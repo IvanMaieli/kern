@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="BackendCodeEditorMiscSettings">
+    <option name="/Default/Housekeeping/FeatureSuggestion/FeatureSuggestionManager/DisabledSuggesters/=SwitchToGoToActionSuggester/@EntryIndexedValue" value="true" type="bool" />
+  </component>
+  <component name="CMakePresetLoader">{
+  &quot;useNewFormat&quot;: true
+}</component>
+  <component name="CMakeProjectFlavorService">
+    <option name="flavorId" value="CMakePlainProjectFlavor" />
+  </component>
+  <component name="CMakeReloadState">
+    <option name="reloaded" value="true" />
+  </component>
+  <component name="CMakeRunConfigurationManager">
+    <generated>
+      <config projectName="kern" targetName="kern-run" />
+      <config projectName="kern" targetName="kern-version-test" />
+      <config projectName="kern" targetName="kern" />
+    </generated>
+  </component>
+  <component name="CMakeSettings">
+    <configurations>
+      <configuration PROFILE_NAME="Debug" ENABLED="true" CONFIG_NAME="Debug" />
+    </configurations>
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ClangdSettings">
+    <option name="formatViaClangd" value="false" />
+  </component>
+  <component name="CurrentDebugProfile">
+    <option name="debugProfileId" value="91db3bac-83bc-4d0e-892a-bb52fda85f76" />
+  </component>
+  <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:Debug" />
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/kern" />
+    <option name="ROOT_SYNC" value="SYNC" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;IvanMaieli&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;git@github.com:IvanMaieli/kern.git&quot;,
+    &quot;accountId&quot;: &quot;e1acb37a-a269-49e1-9caa-9ff753ef3425&quot;
+  }
+}</component>
+  <component name="MacroExpansionManager">
+    <option name="directoryName" value="VrHKYor1" />
+  </component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0016423758110424" />
+      <entry key="MS500" value="1.277462195631897" />
+      <entry key="S2" value="1.8459521526236693" />
+      <entry key="S5" value="2.5613295175271062" />
+      <entry key="S10" value="3.4459322806363506" />
+      <entry key="S30" value="5.5490983258907125" />
+      <entry key="S60" value="7.634468706144221" />
+      <entry key="M2" value="11.148734315630723" />
+      <entry key="M5" value="16.653527964635963" />
+      <entry key="M10" value="19.789356836112646" />
+      <entry key="M15" value="21.056038517443003" />
+      <entry key="M30" value="22.454708287849765" />
+      <entry key="H1" value="23.218421641871373" />
+      <entry key="H2" value="23.701368554129598" />
+      <entry key="H4" value="24.118190697500197" />
+      <entry key="D1" value="24.793212602982134" />
+      <entry key="W1" value="24.968398352419445" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="2.9681044922930446E-62" />
+      <entry key="MS500" value="4.948759357645649E-13" />
+      <entry key="S2" value="8.661898238858627E-4" />
+      <entry key="S5" value="0.07386547484413236" />
+      <entry key="S10" value="0.37727059585469763" />
+      <entry key="S30" value="1.4889151796340436" />
+      <entry key="S60" value="2.39675340978957" />
+      <entry key="M2" value="3.25161000128767" />
+      <entry key="M5" value="4.114809872587716" />
+      <entry key="M10" value="4.514898000625338" />
+      <entry key="M15" value="4.666006395555041" />
+      <entry key="M30" value="4.82738392365278" />
+      <entry key="H1" value="4.912222731880423" />
+      <entry key="H2" value="4.955735653506371" />
+      <entry key="H4" value="4.977772825080915" />
+      <entry key="D1" value="4.996282183961885" />
+      <entry key="W1" value="4.999468556820241" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.002887018008485175" />
+      <entry key="MS500" value="0.4459266662791926" />
+      <entry key="S2" value="1.4293161832860706" />
+      <entry key="S5" value="2.2803872207580276" />
+      <entry key="S10" value="3.4548561590103075" />
+      <entry key="S30" value="6.757162410228551" />
+      <entry key="S60" value="9.833815739067058" />
+      <entry key="M2" value="14.260696448055752" />
+      <entry key="M5" value="20.686892710960223" />
+      <entry key="M10" value="24.256126964917527" />
+      <entry key="M15" value="25.68795095937489" />
+      <entry key="M30" value="27.26393193968841" />
+      <entry key="H1" value="28.121263482670333" />
+      <entry key="H2" value="28.65233550850184" />
+      <entry key="H4" value="29.093559149158004" />
+      <entry key="D1" value="29.7890912200659" />
+      <entry key="W1" value="29.967809186276444" />
+    </decayedShown>
+  </component>
+  <component name="ProjectApplicationVersion">
+    <option name="ide" value="CLion" />
+    <option name="majorVersion" value="2026" />
+    <option name="minorVersion" value="2.0.1" />
+    <option name="productBranch" value="Classic" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 0
+}</component>
+  <component name="ProjectId" id="3HsMUHVANJAHQrT6iFNtcDKqBCY" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "CidrDebugProfileConversion": "true",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.RadMigrateCodeStyle": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.readMode.enableVisualFormatting": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "RunOnceActivity.west.config.association.type.startup.service": "true",
+    "cf.first.check.clang-format": "false",
+    "cidr.known.project.marker": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "ctest.advertisement.all.test.configuration.is.created": "true",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/ivanmaieli/CLionProjects/kern",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.jshint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.jshint": "",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "org.rust.first.attach.projects": "true"
+  }
+}]]></component>
+  <component name="RunManager" selected="CTest Application.All CTest">
+    <configuration name="kern-run" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="kern" TARGET_NAME="kern-run" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="kern" RUN_TARGET_NAME="kern-run">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="kern-version-test" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="kern" TARGET_NAME="kern-version-test" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="kern" RUN_TARGET_NAME="kern-version-test">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="kern" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="kern" TARGET_NAME="kern" CONFIG_NAME="Debug">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="All CTest" type="CTestRunConfiguration" factoryName="CTestRun" PROGRAM_PARAMS="--extra-verbose" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" WORKING_DIR="file://$CMakeCurrentLocalGenerationDir$" PASS_PARENT_ENVS_2="true" RUN_PATH="$CTestCurrentExecutableName$" EXPLICIT_BUILD_TARGET_NAME="all" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <list>
+      <item itemvalue="CMake Application.kern-run" />
+      <item itemvalue="CMake Application.kern-version-test" />
+      <item itemvalue="CMake Application.kern" />
+      <item itemvalue="CTest Application.All CTest" />
+    </list>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="" />
+      <created>1786652336455</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1786652336455</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="VCPKGProject">
+    <isAutomaticCheckingOnLaunch value="false" />
+    <isAutomaticFoundErrors value="true" />
+    <isAutomaticReloadCMake value="true" />
+    <isAutomaticBootstrapAfterUpdate value="false" />
+  </component>
+</project>
