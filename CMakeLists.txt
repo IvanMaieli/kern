@@ -15,6 +15,7 @@ add_library(kern
         include/kern/shape.hpp
         src/shape.cpp
         include/kern/dtype.hpp
+        include/kern/tensor.hpp
 )
 
 add_library(kern::kern ALIAS kern)

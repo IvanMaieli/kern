@@ -1,5 +1,4 @@
-#ifndef KERN_TESTS_TEST_MACROS_HPP
-#define KERN_TESTS_TEST_MACROS_HPP
+#pragma once
 
 #include "tests.hpp"
 
@@ -15,5 +14,3 @@
             ++failures;                                                         \
         }                                                                       \
     } while (false)
-
-#endif // KERN_TESTS_TEST_MACROS_HPP
