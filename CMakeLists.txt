@@ -8,7 +8,6 @@ project(
 )
 
 option(KERN_BUILD_TESTS "Build Kern tests" ON)
-
 add_library(kern
         include/kern/version.hpp
         src/version.cpp
@@ -63,6 +62,7 @@ if(KERN_BUILD_TESTS)
             tests/version_test.cpp
             tests/shape_test.cpp
             tests/dtype_test.cpp
+            tests/tensor_test.cpp
     )
     target_link_libraries(
             kern-tests

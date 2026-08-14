@@ -6,8 +6,6 @@
 #include <kern/dtype.hpp>
 #include <kern/shape.hpp>
 
-#define ALIGNMENT 64                // Alignment constant based on Apple Silicon
-
 namespace kern {
     namespace  {
         size_t calc_bytes(const Shape& shape, const DataType dtype ) {
@@ -22,7 +20,7 @@ namespace kern {
         : shape_(shape), dtype_(dtype), data_(nullptr), capacity_(calc_bytes(shape_, dtype_)) {
         if (capacity_ > 0) {
             const size_t padded_capacity = align_capacity(capacity_);
-            data_ = std::aligned_alloc(64, padded_capacity);
+            data_ = std::aligned_alloc(ALIGNMENT, padded_capacity);
             if (!data_) throw std::bad_alloc();
         }
 
@@ -56,5 +54,4 @@ namespace kern {
     }
 
     Tensor::~Tensor() { release(); }
-
 }

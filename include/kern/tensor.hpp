@@ -7,11 +7,14 @@
 #include <kern/dtype.hpp>
 #include <kern/shape.hpp>
 
+static constexpr size_t ALIGNMENT = 64UL;       // SIMD Alignment optimization
+
 namespace kern {
     class Tensor {
     public:
         Tensor() = default;
         Tensor(const Shape& shape, const DataType dtype);
+
         ~Tensor();
 
         // Reducing copy probability
@@ -27,12 +30,12 @@ namespace kern {
         size_t size_bytes() const noexcept { return capacity_; };
         void* data() { return data_; }                  // For non-const purposes
         const void* data() const { return data_; }      // For const purposes
-        void release();                                 // Free helper
-
     private:
         Shape shape_;
         DataType dtype_;
         void* data_;
         size_t capacity_;
+        void release();                                 // Free helper
+
     };
 }
