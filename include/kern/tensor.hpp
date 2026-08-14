@@ -11,7 +11,8 @@ namespace kern {
     class Tensor {
     public:
         Tensor() = default;
-        Tensor(Shape shape, DType dtype);
+        Tensor(const Shape& shape, const DataType dtype);
+        ~Tensor();
 
         // Reducing copy probability
         Tensor(const Tensor&) = delete;
@@ -21,10 +22,11 @@ namespace kern {
         Tensor(Tensor&& other) noexcept;
         Tensor& operator=(Tensor&& other) noexcept;
 
-        const Shape& shape() const { return _shape; }
-        DType dtype() const { return _dtype; }
-        void* data() { return _data; }                  // For non-const purposes
-        const void* data() const { return _data; }      // For const purposes
+        const Shape& shape() const { return shape_; }
+        DataType dtype() const { return dtype_; }
+        size_t size_bytes() const noexcept { return capacity_; };
+        void* data() { return data_; }                  // For non-const purposes
+        const void* data() const { return data_; }      // For const purposes
         void release();                                 // Free helper
 
     private:
