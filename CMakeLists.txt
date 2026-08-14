@@ -14,6 +14,7 @@ add_library(kern
         src/version.cpp
         include/kern/shape.hpp
         src/shape.cpp
+        include/kern/dtype.hpp
 )
 
 add_library(kern::kern ALIAS kern)
@@ -53,19 +54,16 @@ target_link_libraries(
 if(KERN_BUILD_TESTS)
     enable_testing()
 
-    add_executable(kern-version-test
-            tests/version_test.cpp
+    add_executable(kern-tests
+            tests/kern_test.cpp
     )
-
     target_link_libraries(
-            kern-version-test
+            kern-tests
             PRIVATE
             kern::kern
     )
-
     add_test(
-            NAME kern.version
-            COMMAND kern-version-test
+            NAME kern.tests
+            COMMAND kern-tests
     )
-
 endif()

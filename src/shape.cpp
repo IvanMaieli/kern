@@ -1,40 +1,47 @@
-//
-// Created by Ivan Maieli on 14/08/2026.
-//
-
 #include <kern/shape.hpp>
 #include <limits>
 #include <stdexcept>
 
 namespace kern {
 
-    Shape::Shape(std::initializer_list<std::size_t> dimensions)
-        : dimensions_{dimensions} {
+    Shape::Shape(const std::initializer_list<Dimension> dimensions) {
+        if (dimensions.size() > maximum_rank)
+            throw std::invalid_argument{"Shape rank exceeds the maximum supported rank"};
+
+        rank_ = dimensions.size();
+        std::size_t axis = 0;
+        for (const Dimension dimension : dimensions) {
+            dimensions_[axis] = dimension;
+            ++axis;
+        }
     }
 
     std::size_t Shape::rank() const noexcept {
-        return dimensions_.size();
+        return rank_;
     }
 
     bool Shape::empty() const noexcept {
-        return dimensions_.empty();
+        return rank_ == 0;
     }
 
-    std::size_t Shape::dimension(const std::size_t axis) const {
-        return dimensions_.at(axis);
+    Shape::Dimension Shape::dimension(const std::size_t axis) const {
+        if (axis >= rank_)
+            throw std::out_of_range{"Shape axis is out of range"};
+        return dimensions_[axis];
     }
 
     std::size_t Shape::element_count() const {
-        for (const std::size_t dimension : dimensions_) if (dimension == 0) return 0;
+        if (empty()) return 1;
 
         std::size_t count = 1;
-        for (const std::size_t dimension : dimensions_) {
-            if (constexpr std::size_t maximum = std::numeric_limits<std::size_t>::max();
-                count > maximum / dimension) {
+        for (std::size_t axis = 0; axis < rank_; ++axis) {
+            const Dimension current_dimension = dimensions_[axis];
+            if (current_dimension == 0) return 0;
+            if (constexpr std::size_t maximum = std::numeric_limits<std::size_t>::max(); count > maximum / current_dimension)
                 throw std::overflow_error{"Shape element count overflow"};
-                }
-            count *= dimension;
+            count *= current_dimension;
         }
         return count;
     }
+
 } // namespace kern
