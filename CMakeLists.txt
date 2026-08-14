@@ -12,6 +12,8 @@ option(KERN_BUILD_TESTS "Build Kern tests" ON)
 add_library(kern
         include/kern/version.hpp
         src/version.cpp
+        include/kern/shape.hpp
+        src/shape.cpp
 )
 
 add_library(kern::kern ALIAS kern)
