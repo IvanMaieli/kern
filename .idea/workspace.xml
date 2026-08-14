@@ -28,15 +28,11 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="Shape class implementation">
-      <change afterPath="$PROJECT_DIR$/.idea/ctestState.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/include/kern/dtype.hpp" afterDir="false" />
+    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="version, dtype and shape testing implemented">
+      <change afterPath="$PROJECT_DIR$/tests/shape_test.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/kern_run.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/app/kern_run.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/include/kern/shape.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/include/kern/shape.hpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/shape.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/shape.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/version_test.cpp" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/kern_test.cpp" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -60,12 +56,12 @@
     &quot;assignee&quot;: &quot;IvanMaieli&quot;
   }
 }</component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/IvanMaieli/kern.git",
-    "accountId": "e1acb37a-a269-49e1-9caa-9ff753ef3425"
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/IvanMaieli/kern.git&quot;,
+    &quot;accountId&quot;: &quot;e1acb37a-a269-49e1-9caa-9ff753ef3425&quot;
   }
-}]]></component>
+}</component>
   <component name="MacroExpansionManager">
     <option name="directoryName" value="VrHKYor1" />
   </component>
@@ -75,61 +71,61 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0" />
-      <entry key="MS500" value="1.0" />
-      <entry key="S2" value="1.0000000178130788" />
-      <entry key="S5" value="1.0008165438599816" />
-      <entry key="S10" value="1.042412909836495" />
-      <entry key="S30" value="2.573119221417228" />
-      <entry key="S60" value="5.589032560775118" />
-      <entry key="M2" value="9.057639173452767" />
-      <entry key="M5" value="12.80753449857484" />
-      <entry key="M10" value="15.866919574349318" />
-      <entry key="M15" value="18.330136435951005" />
-      <entry key="M30" value="24.63973524210618" />
-      <entry key="H1" value="34.31313188575023" />
-      <entry key="H2" value="45.32376842825238" />
-      <entry key="H4" value="54.4173733858489" />
-      <entry key="D1" value="65.29620230977113" />
-      <entry key="W1" value="67.60038292650616" />
+      <entry key="MS100" value="1.0262780129766786" />
+      <entry key="MS500" value="1.483273609141339" />
+      <entry key="S2" value="2.1814433396792623" />
+      <entry key="S5" value="3.9152363271295085" />
+      <entry key="S10" value="6.226864212175744" />
+      <entry key="S30" value="10.697325255537182" />
+      <entry key="S60" value="14.684064181444379" />
+      <entry key="M2" value="19.05327718863171" />
+      <entry key="M5" value="23.765632068967264" />
+      <entry key="M10" value="27.252417955731676" />
+      <entry key="M15" value="29.871863201034177" />
+      <entry key="M30" value="36.34934482561863" />
+      <entry key="H1" value="46.12132286512799" />
+      <entry key="H2" value="57.20138009304812" />
+      <entry key="H4" value="66.34524624719381" />
+      <entry key="D1" value="77.28200138239139" />
+      <entry key="W1" value="79.59828827000712" />
     </decayedCancelled>
     <decayedSelected>
-      <entry key="MS100" value="4.213634665076691E-13" />
-      <entry key="MS500" value="0.003349125143102233" />
-      <entry key="S2" value="0.2405652227732798" />
-      <entry key="S5" value="0.5655788201151086" />
-      <entry key="S10" value="0.7520497457715869" />
-      <entry key="S30" value="0.9093872402512785" />
-      <entry key="S60" value="0.9536179739556498" />
-      <entry key="M2" value="0.9765336523729622" />
-      <entry key="M5" value="0.9906589710056433" />
-      <entry key="M10" value="1.0063295458984265" />
-      <entry key="M15" value="1.055408829058386" />
-      <entry key="M30" value="1.4870982580970467" />
-      <entry key="H1" value="2.915829714525169" />
-      <entry key="H2" value="5.077990395308171" />
-      <entry key="H4" value="7.034359523845175" />
-      <entry key="D1" value="9.415694290603719" />
-      <entry key="W1" value="9.914003406774496" />
+      <entry key="MS100" value="5.3768613491695596E-45" />
+      <entry key="MS500" value="1.3999282211800599E-9" />
+      <entry key="S2" value="0.006159660997549866" />
+      <entry key="S5" value="0.14809363310492135" />
+      <entry key="S10" value="0.49459974367596665" />
+      <entry key="S30" value="1.2233533145599906" />
+      <entry key="S60" value="1.5588984964526011" />
+      <entry key="M2" value="1.7642228401866475" />
+      <entry key="M5" value="1.9018425515936008" />
+      <entry key="M10" value="1.9609362869375957" />
+      <entry key="M15" value="2.0240911136351483" />
+      <entry key="M30" value="2.467254059956829" />
+      <entry key="H1" value="3.8990502547903545" />
+      <entry key="H2" value="6.0644122339397715" />
+      <entry key="H4" value="8.025222077072401" />
+      <entry key="D1" value="10.413694785163232" />
+      <entry key="W1" value="10.913703512785103" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="1.8810896014263328E-6" />
-      <entry key="MS500" value="0.07256872726763329" />
-      <entry key="S2" value="0.6939280140085536" />
-      <entry key="S5" value="1.2689013997709158" />
-      <entry key="S10" value="1.6257615658540208" />
-      <entry key="S30" value="3.4135182691182617" />
-      <entry key="S60" value="6.496973327947814" />
-      <entry key="M2" value="10.00431882015736" />
-      <entry key="M5" value="13.783401394927312" />
-      <entry key="M10" value="16.86512549769791" />
-      <entry key="M15" value="19.379700733888207" />
-      <entry key="M30" value="26.122673078698682" />
-      <entry key="H1" value="37.22495746856735" />
-      <entry key="H2" value="50.398292330822905" />
-      <entry key="H4" value="61.44933141263458" />
-      <entry key="D1" value="74.71135985334577" />
-      <entry key="W1" value="77.51430555917779" />
+      <entry key="MS100" value="1.0046278525626182" />
+      <entry key="MS500" value="1.4751183218429917" />
+      <entry key="S2" value="2.178596692562745" />
+      <entry key="S5" value="4.010536222809824" />
+      <entry key="S10" value="6.629407091959971" />
+      <entry key="S30" value="11.838959870939103" />
+      <entry key="S60" value="16.182877639791176" />
+      <entry key="M2" value="20.777472121058185" />
+      <entry key="M5" value="25.647513632752055" />
+      <entry key="M10" value="29.20240644012777" />
+      <entry key="M15" value="31.888171705886418" />
+      <entry key="M30" value="38.811447213791055" />
+      <entry key="H1" value="50.015871055232466" />
+      <entry key="H2" value="63.26207518855722" />
+      <entry key="H4" value="74.36794012974268" />
+      <entry key="D1" value="87.69513791787351" />
+      <entry key="W1" value="90.51190792352209" />
     </decayedShown>
   </component>
   <component name="ProjectApplicationVersion">
@@ -149,6 +145,7 @@
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
     &quot;CMake Application.kern-run.executor&quot;: &quot;Run&quot;,
+    &quot;CMake Application.kern-tests.executor&quot;: &quot;Run&quot;,
     &quot;CMake Application.kern-version-test.executor&quot;: &quot;Run&quot;,
     &quot;CidrDebugProfileConversion&quot;: &quot;true&quot;,
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
@@ -197,6 +194,11 @@
     <configuration default="true" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration default="true" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
     <configuration name="kern-run" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="kern" TARGET_NAME="kern-run" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="kern" RUN_TARGET_NAME="kern-run">
@@ -249,6 +251,7 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="clean structure" />
     <MESSAGE value="Shape class implementation" />
-    <option name="LAST_COMMIT_MESSAGE" value="Shape class implementation" />
+    <MESSAGE value="version, dtype and shape testing implemented" />
+    <option name="LAST_COMMIT_MESSAGE" value="version, dtype and shape testing implemented" />
   </component>
 </project>

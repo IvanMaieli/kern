@@ -55,7 +55,12 @@ if(KERN_BUILD_TESTS)
     enable_testing()
 
     add_executable(kern-tests
-            tests/kern_test.cpp
+            tests/main.cpp
+            tests/tests.hpp
+            tests/test_macros.hpp
+            tests/version_test.cpp
+            tests/shape_test.cpp
+            tests/dtype_test.cpp
     )
     target_link_libraries(
             kern-tests
