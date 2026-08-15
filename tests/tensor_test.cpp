@@ -20,7 +20,7 @@ void test_tensor_alignment() {
     kern::Tensor t(shape, kern::DataType::float32);
 
     const uintptr_t address = reinterpret_cast<uintptr_t>(t.data());
-    CHECK((address % ALIGNMENT) == 0);
+    CHECK((address % kern::ALIGNMENT) == 0);
 }
 
 void test_tensor_move() {
@@ -45,5 +45,5 @@ void test_tensor_with_pool() {
     
     CHECK(t.data() != nullptr);
     const uintptr_t address = reinterpret_cast<uintptr_t>(t.data());
-    CHECK((address % ALIGNMENT) == 0);
+    CHECK((address % kern::ALIGNMENT) == 0);
 }

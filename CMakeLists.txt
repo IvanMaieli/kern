@@ -19,11 +19,15 @@ add_library(kern
         src/shape.cpp
         include/kern/dtype.hpp
         include/kern/tensor.hpp
+        include/kern/config.hpp
         src/tensor.cpp
         include/kern/memory_pool.hpp
         src/memory_pool.cpp
+        include/kern/buffer.hpp
+        src/buffer.cpp
         include/kern/ops.hpp
         src/ops.cpp
+        include/kern/config.hpp
 )
 
 add_library(kern::kern ALIAS kern)

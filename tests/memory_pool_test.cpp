@@ -9,13 +9,14 @@ void test_memory_pool_alignment() {
     
     // First allocation should be aligned
     void* p1 = pool.allocate(10);
-    const auto addr1 = reinterpret_cast<uintptr_t>(p1);
-    CHECK(addr1 % ALIGNMENT == 0);
-    
+    uintptr_t addr1 = reinterpret_cast<uintptr_t>(p1);
+    CHECK((addr1 % kern::ALIGNMENT) == 0);
+
     // Second allocation should also be aligned
     void* p2 = pool.allocate(20);
-    const auto addr2 = reinterpret_cast<uintptr_t>(p2);
-    CHECK(addr2 % ALIGNMENT == 0);
+    uintptr_t addr2 = reinterpret_cast<uintptr_t>(p2);
+    CHECK((addr2 % kern::ALIGNMENT) == 0);
+
     
     // Ensure they don't overlap
     CHECK(static_cast<char*>(p2) >= static_cast<char*>(p1) + 10);

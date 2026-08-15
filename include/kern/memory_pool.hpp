@@ -5,10 +5,10 @@
 #pragma once
 
 #include <cstddef>
-
-static constexpr size_t ALIGNMENT = 64UL;       // SIMD Alignment optimization
+#include <kern/config.hpp>
 
 namespace kern {
+
     class MemoryPool {
     public:
         explicit MemoryPool(size_t total_size);

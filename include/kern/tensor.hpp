@@ -1,11 +1,10 @@
-//
-// Created by Ivan Maieli on 14/08/2026.
-//
-
 #pragma once
 
 #include <kern/dtype.hpp>
 #include <kern/shape.hpp>
+#include <kern/buffer.hpp>
+#include <kern/config.hpp>
+#include <memory>
 
 namespace kern {
     class MemoryPool;
@@ -15,28 +14,31 @@ namespace kern {
         Tensor() = default;
         Tensor(const Shape& shape, const DataType dtype);
         Tensor(const Shape& shape, const DataType dtype, MemoryPool& pool);
+        
+        // Constructor for View
+        Tensor(const Shape& shape, const DataType dtype, std::shared_ptr<Buffer> buffer);
 
-        ~Tensor();
+        ~Tensor() = default;
 
-        // Reducing copy probability
-        Tensor(const Tensor&) = delete;
-        Tensor& operator=(const Tensor&) = delete;
+        Tensor(const Tensor&) = default;
+        Tensor& operator=(const Tensor&) = default;
 
-        // Move semantics with '=' symbol
-        explicit Tensor(Tensor&& other) noexcept;
-        Tensor& operator=(Tensor&& other) noexcept;
+        Tensor(Tensor&& other) noexcept = default;
+        Tensor& operator=(Tensor&& other) noexcept = default;
 
         [[nodiscard]] const Shape& shape() const { return shape_; }
         [[nodiscard]] DataType dtype() const { return dtype_; }
-        [[nodiscard]] size_t size_bytes() const noexcept { return capacity_; }
-        [[nodiscard]] void* data() { return data_; }                                // For non-const purposes
-        [[nodiscard]] const void* data() const { return data_; }                    // For const purposes
+        [[nodiscard]] size_t size_bytes() const noexcept { return buffer_ ? buffer_->size() : 0; }
+        [[nodiscard]] void* data() { return buffer_ ? buffer_->data() : nullptr; }
+        [[nodiscard]] const void* data() const { return buffer_ ? buffer_->data() : nullptr; }
+        [[nodiscard]] std::shared_ptr<Buffer> buffer() const { return buffer_; }
+        
+        void set_shape(const Shape& shape) { shape_ = shape; }
+        void set_buffer(const std::shared_ptr<Buffer> &buffer) { buffer_ = buffer; }
+
     private:
         Shape shape_;
         DataType dtype_;
-        void* data_;
-        size_t capacity_;
-        MemoryPool* pool_ = nullptr;
-        void release();                                                             // Free helper
+        std::shared_ptr<Buffer> buffer_;
     };
 }

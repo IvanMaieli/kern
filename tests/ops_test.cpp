@@ -5,11 +5,10 @@
 #include "test_macros.hpp"
 #include "tests.hpp"
 #include <vector>
-#include <cstring>
 #include <stdexcept>
 
 void test_ops_add() {
-    kern::Shape shape{2, 2};
+    const kern::Shape shape{2, 2};
     kern::Tensor t1(shape, kern::DataType::float32);
     kern::Tensor t2(shape, kern::DataType::float32);
     kern::Tensor out(shape, kern::DataType::float32);
@@ -41,4 +40,22 @@ void test_ops_add_mismatched_shape() {
         caught = true;
     }
     CHECK(caught);
+}
+
+void test_ops_reshape() {
+    const kern::Shape shape_in{4};
+    const kern::Shape shape_out{2, 2};
+    kern::Tensor t_in(shape_in, kern::DataType::float32);
+    kern::Tensor t_out(shape_out, kern::DataType::float32);
+
+    auto* in_data = static_cast<float*>(t_in.data());
+    in_data[0] = 1.0f; in_data[1] = 2.0f; in_data[2] = 3.0f; in_data[3] = 4.0f;
+
+    kern::ops::Reshape(t_in, shape_out, t_out);
+
+    const auto* out_data = static_cast<float*>(t_out.data());
+    CHECK(out_data[0] == 1.0f);
+    CHECK(out_data[1] == 2.0f);
+    CHECK(out_data[2] == 3.0f);
+    CHECK(out_data[3] == 4.0f);
 }

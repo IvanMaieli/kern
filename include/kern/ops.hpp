@@ -8,5 +8,6 @@
 
 namespace kern::ops {
     void Add(const Tensor& a, const Tensor& b, Tensor& out);
+    void Reshape(const Tensor& in, const Shape& new_shape, Tensor& out);
 
 } // namespace kern::ops

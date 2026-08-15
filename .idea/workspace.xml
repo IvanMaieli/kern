@@ -28,7 +28,21 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="Basic add operation implementation" />
+    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="Simple README.md update">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/include/kern/memory_pool.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/include/kern/memory_pool.hpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/include/kern/ops.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/include/kern/ops.hpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/include/kern/tensor.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/include/kern/tensor.hpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/memory_pool.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/memory_pool.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/ops.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ops.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/tensor.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/tensor.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/main.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/memory_pool_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/memory_pool_test.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/ops_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/ops_test.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/tensor_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/tensor_test.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/tests.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/tests.hpp" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -66,61 +80,61 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.0000000000001525" />
-      <entry key="MS500" value="1.0044541240407616" />
-      <entry key="S2" value="1.9739361079435778" />
-      <entry key="S5" value="4.371554002077782" />
-      <entry key="S10" value="6.174901674481776" />
-      <entry key="S30" value="7.9132833943639085" />
-      <entry key="S60" value="8.43844954471479" />
-      <entry key="M2" value="8.783018280980105" />
-      <entry key="M5" value="9.766360279141125" />
-      <entry key="M10" value="12.684948921754074" />
-      <entry key="M15" value="16.23301685512194" />
-      <entry key="M30" value="27.521271378965146" />
-      <entry key="H1" value="55.913245529460184" />
-      <entry key="H2" value="119.67685322894984" />
-      <entry key="H4" value="211.0439308471609" />
-      <entry key="D1" value="382.94622519153296" />
-      <entry key="W1" value="429.5340288164658" />
-    </decayedCancelled>
-    <decayedSelected>
       <entry key="MS100" value="0.0" />
       <entry key="MS500" value="0.0" />
       <entry key="S2" value="0.0" />
-      <entry key="S5" value="2.225815852176643E-140" />
-      <entry key="S10" value="1.4936000958565137E-70" />
-      <entry key="S30" value="6.232936516618968E-24" />
-      <entry key="S60" value="3.862080034872717E-12" />
-      <entry key="M2" value="3.655346758577047E-6" />
-      <entry key="M5" value="0.017031768758688014" />
-      <entry key="M10" value="0.3465198384072928" />
-      <entry key="M15" value="1.0305888671911685" />
-      <entry key="M30" value="3.717641377142041" />
-      <entry key="H1" value="9.99472699640681" />
-      <entry key="H2" value="21.965519402350346" />
-      <entry key="H4" value="37.49251472086007" />
-      <entry key="D1" value="65.25299565094222" />
-      <entry key="W1" value="72.65724775490452" />
+      <entry key="S5" value="1.2081528912543804E-134" />
+      <entry key="S10" value="2.874682692355543E-67" />
+      <entry key="S30" value="2.4116927851916657E-22" />
+      <entry key="S60" value="4.267379217203878E-11" />
+      <entry key="M2" value="2.0803738356255304E-5" />
+      <entry key="M5" value="0.06765960181061534" />
+      <entry key="M10" value="1.2059133985747512" />
+      <entry key="M15" value="3.55341032647024" />
+      <entry key="M30" value="13.326935055643391" />
+      <entry key="H1" value="38.87220031674497" />
+      <entry key="H2" value="99.40937384651129" />
+      <entry key="H4" value="193.09127385338135" />
+      <entry key="D1" value="382.11407971421266" />
+      <entry key="W1" value="435.2702726831717" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="1.0000001350502832" />
+      <entry key="MS500" value="1.0425257777588237" />
+      <entry key="S2" value="1.579096681971756" />
+      <entry key="S5" value="2.164983947293248" />
+      <entry key="S10" value="2.5141396303314645" />
+      <entry key="S30" value="2.8194928030481745" />
+      <entry key="S60" value="2.907176452375151" />
+      <entry key="M2" value="2.9529275847944576" />
+      <entry key="M5" value="2.9867221167120044" />
+      <entry key="M10" value="3.0842869231181536" />
+      <entry key="M15" value="3.318259693122473" />
+      <entry key="M30" value="4.819971137888494" />
+      <entry key="H1" value="9.78363809033507" />
+      <entry key="H2" value="21.015225626923232" />
+      <entry key="H4" value="37.08407599950792" />
+      <entry key="D1" value="67.9217813200614" />
+      <entry key="W1" value="76.4439405429704" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9794202975870763" />
-      <entry key="MS500" value="1.0002859035598164" />
-      <entry key="S2" value="1.9719636897304522" />
-      <entry key="S5" value="4.369852285740726" />
-      <entry key="S10" value="6.173707404997033" />
-      <entry key="S30" value="7.912774828660411" />
-      <entry key="S60" value="8.438164692811066" />
-      <entry key="M2" value="8.782677430640726" />
-      <entry key="M5" value="9.782497995548333" />
-      <entry key="M10" value="13.029169454444096" />
-      <entry key="M15" value="17.26001044795194" />
-      <entry key="M30" value="31.23287103371416" />
-      <entry key="H1" value="65.8988947912071" />
-      <entry key="H2" value="141.63126222446297" />
-      <entry key="H4" value="248.52632390572876" />
-      <entry key="D1" value="448.196107989995" />
-      <entry key="W1" value="502.1907763446375" />
+      <entry key="MS100" value="4.46208562003942E-4" />
+      <entry key="MS500" value="0.2316618946596334" />
+      <entry key="S2" value="1.1418927885393932" />
+      <entry key="S5" value="1.9180838451409659" />
+      <entry key="S10" value="2.369921469040166" />
+      <entry key="S30" value="2.7653891637557035" />
+      <entry key="S60" value="2.8792586670576483" />
+      <entry key="M2" value="2.9387635034662534" />
+      <entry key="M5" value="3.0486356442489253" />
+      <entry key="M10" value="4.287109695276309" />
+      <entry key="M15" value="6.869093663528081" />
+      <entry key="M30" value="18.1434944379347" />
+      <entry key="H1" value="48.649650947696756" />
+      <entry key="H2" value="120.41557077486927" />
+      <entry key="H4" value="230.16622399375046" />
+      <entry key="D1" value="450.0327823317507" />
+      <entry key="W1" value="511.7137103596497" />
     </decayedShown>
   </component>
   <component name="ProjectApplicationVersion">
@@ -256,6 +270,7 @@
     <MESSAGE value="memory_pool.cpp testing implementation" />
     <MESSAGE value="tensor with linear memory pool implementation" />
     <MESSAGE value="Basic add operation implementation" />
-    <option name="LAST_COMMIT_MESSAGE" value="Basic add operation implementation" />
+    <MESSAGE value="Simple README.md update" />
+    <option name="LAST_COMMIT_MESSAGE" value="Simple README.md update" />
   </component>
 </project>

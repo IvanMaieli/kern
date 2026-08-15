@@ -1,5 +1,6 @@
 #include <kern/ops.hpp>
 #include <stdexcept>
+#include <cstring>
 
 namespace kern::ops {
 
@@ -17,5 +18,14 @@ namespace kern::ops {
             const size_t n = a.shape().element_count();
             for (size_t i = 0; i < n; ++i) out_ptr[i] = a_ptr[i] + b_ptr[i];
         } else throw std::runtime_error("Unsupported dtype for Add operation.");
+    }
+
+    void Reshape(const Tensor& in, const Shape& new_shape, Tensor& out) {
+        if (in.shape().element_count() != new_shape.element_count())
+            throw std::invalid_argument("Reshape: Total element count must match.");
+        
+        // This is the new "View" based reshape
+        out.set_shape(new_shape);
+        out.set_buffer(in.buffer());
     }
 } // namespace kern::ops
