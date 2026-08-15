@@ -9,6 +9,9 @@ int main() {
     std::printf("Running tensor basics...\n"); test_tensor_basics();
     std::printf("Running tensor alignment...\n"); test_tensor_alignment();
     std::printf("Running tensor move...\n"); test_tensor_move();
+    std::printf("Running tensor with pool...\n"); test_tensor_with_pool();
+    std::printf("Running ops add...\n"); test_ops_add();
+    std::printf("Running ops add mismatched...\n"); test_ops_add_mismatched_shape();
     std::printf("Running pool alignment...\n"); test_memory_pool_alignment();
     std::printf("Running pool reset...\n"); test_memory_pool_reset();
     std::printf("Running pool oom...\n"); test_memory_pool_oom();

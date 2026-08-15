@@ -21,6 +21,7 @@ namespace kern {
         [[nodiscard]] bool empty() const noexcept;
         [[nodiscard]] Dimension dimension(std::size_t axis) const;
         [[nodiscard]] std::size_t element_count() const;
+        [[nodiscard]] bool operator==(const Shape& other) const noexcept;
 
     private:
         std::array<Dimension, maximum_rank> dimensions_{};

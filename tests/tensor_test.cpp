@@ -35,3 +35,15 @@ void test_tensor_move() {
     CHECK(t1.data() == nullptr);
     CHECK(t2.shape().element_count() == 100);
 }
+
+void test_tensor_with_pool() {
+    kern::MemoryPool pool(1024);
+    const kern::Shape shape{4, 4};
+    
+    // Create tensor using the pool
+    kern::Tensor t(shape, kern::DataType::float32, pool);
+    
+    CHECK(t.data() != nullptr);
+    const uintptr_t address = reinterpret_cast<uintptr_t>(t.data());
+    CHECK((address % ALIGNMENT) == 0);
+}

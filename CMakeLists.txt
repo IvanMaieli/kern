@@ -22,6 +22,8 @@ add_library(kern
         src/tensor.cpp
         include/kern/memory_pool.hpp
         src/memory_pool.cpp
+        include/kern/ops.hpp
+        src/ops.cpp
 )
 
 add_library(kern::kern ALIAS kern)
@@ -70,6 +72,7 @@ if(KERN_BUILD_TESTS)
             tests/dtype_test.cpp
             tests/tensor_test.cpp
             tests/memory_pool_test.cpp
+            tests/ops_test.cpp
     )
     target_link_libraries(
             kern-tests

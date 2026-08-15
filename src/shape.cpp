@@ -7,7 +7,6 @@
 #include <stdexcept>
 
 namespace kern {
-
     Shape::Shape(const std::initializer_list<Dimension> dimensions) {
         if (dimensions.size() > maximum_rank)
             throw std::invalid_argument{"Shape rank exceeds the maximum supported rank"};
@@ -46,6 +45,14 @@ namespace kern {
             count *= current_dimension;
         }
         return count;
+    }
+
+    bool Shape::operator==(const Shape& other) const noexcept {
+        if (rank_ != other.rank_) return false;
+        for (std::size_t i = 0; i < rank_; ++i)
+            if (dimensions_[i] != other.dimensions_[i]) return false;
+
+        return true;
     }
 
 } // namespace kern
