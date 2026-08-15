@@ -34,11 +34,7 @@ void test_ops_add_mismatched_shape() {
     kern::Tensor out(kern::Shape{2, 2}, kern::DataType::float32);
 
     bool caught = false;
-    try {
-        kern::ops::Add(t1, t2, out);
-    } catch (const std::invalid_argument&) {
-        caught = true;
-    }
+    try { kern::ops::Add(t1, t2, out); } catch (const std::invalid_argument&) { caught = true; }
     CHECK(caught);
 }
 
@@ -58,4 +54,16 @@ void test_ops_reshape() {
     CHECK(out_data[1] == 2.0f);
     CHECK(out_data[2] == 3.0f);
     CHECK(out_data[3] == 4.0f);
+}
+
+void test_ops_permute() {
+    kern::Shape shape_in{2, 3, 4};
+    kern::Shape shape_out{4, 2, 3};
+    kern::Tensor t_in(shape_in, kern::DataType::float32);
+    kern::Tensor t_out(shape_out, kern::DataType::float32);
+
+    kern::ops::Permute(t_in, {2, 0, 1}, t_out);
+
+    CHECK(t_out.shape() == shape_out);
+    CHECK(t_out.buffer() == t_in.buffer());
 }

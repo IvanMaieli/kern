@@ -24,7 +24,21 @@ namespace kern::ops {
         if (in.shape().element_count() != new_shape.element_count())
             throw std::invalid_argument("Reshape: Total element count must match.");
         
-        // This is the new "View" based reshape
+        out.set_shape(new_shape);
+        out.set_buffer(in.buffer());
+    }
+
+    void Transpose(const Tensor& in, std::size_t axis1, std::size_t axis2, Tensor& out) {
+        std::vector<std::size_t> order(in.shape().rank());
+        for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::swap(order[axis1], order[axis2]);
+        Permute(in, order, out);
+    }
+
+    void Permute(const Tensor& in, const std::vector<std::size_t>& order, Tensor& out) {
+        Shape new_shape = in.shape();
+        new_shape.apply_permutation(order);
+        
         out.set_shape(new_shape);
         out.set_buffer(in.buffer());
     }

@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 namespace kern {
+
     Shape::Shape(const std::initializer_list<Dimension> dimensions) {
         if (dimensions.size() > maximum_rank)
             throw std::invalid_argument{"Shape rank exceeds the maximum supported rank"};
@@ -17,14 +18,16 @@ namespace kern {
             dimensions_[axis] = dimension;
             ++axis;
         }
+        compute_strides();
     }
 
-    std::size_t Shape::rank() const noexcept {
-        return rank_;
-    }
-
-    bool Shape::empty() const noexcept {
-        return rank_ == 0;
+    void Shape::compute_strides() {
+        std::size_t s = 1;
+        for (std::size_t i = rank_; i > 0; --i) {
+            const std::size_t axis = i - 1;
+            strides_[axis] = s;
+            s *= dimensions_[axis];
+        }
     }
 
     Shape::Dimension Shape::dimension(const std::size_t axis) const {
@@ -33,26 +36,58 @@ namespace kern {
         return dimensions_[axis];
     }
 
+    Shape::Dimension Shape::stride(const std::size_t axis) const {
+        if (axis >= rank_)
+            throw std::out_of_range{"Shape axis is out of range"};
+        return strides_[axis];
+    }
+
     std::size_t Shape::element_count() const {
         if (empty()) return 1;
-
         std::size_t count = 1;
         for (std::size_t axis = 0; axis < rank_; ++axis) {
-            const Dimension current_dimension = dimensions_[axis];
-            if (current_dimension == 0) return 0;
-            if (constexpr std::size_t maximum = std::numeric_limits<std::size_t>::max(); count > maximum / current_dimension)
-                throw std::overflow_error{"Shape element count overflow"};
-            count *= current_dimension;
+            count *= dimensions_[axis];
         }
         return count;
     }
 
     bool Shape::operator==(const Shape& other) const noexcept {
         if (rank_ != other.rank_) return false;
-        for (std::size_t i = 0; i < rank_; ++i)
+        for (std::size_t i = 0; i < rank_; ++i) {
             if (dimensions_[i] != other.dimensions_[i]) return false;
-
+        }
         return true;
     }
 
-} // namespace kern
+    std::size_t Shape::linear_index(const std::array<Dimension, maximum_rank>& coords) const {
+        std::size_t index = 0;
+        for (std::size_t axis = 0; axis < rank_; ++axis) {
+            index += coords[axis] * strides_[axis];
+        }
+        return index;
+    }
+
+    void Shape::swap_dimensions(std::size_t axis1, std::size_t axis2) {
+        if (axis1 >= rank_ || axis2 >= rank_)
+            throw std::out_of_range{"Shape axis is out of range"};
+
+        std::swap(dimensions_[axis1], dimensions_[axis2]);
+        compute_strides();
+    }
+
+    void Shape::apply_permutation(const std::vector<std::size_t>& order) {
+        if (order.size() != rank_)
+            throw std::invalid_argument{"Permutation order must match rank."};
+
+        std::array<Dimension, maximum_rank> new_dims;
+        for (std::size_t i = 0; i < rank_; ++i) {
+            if (order[i] >= rank_)
+                throw std::out_of_range{"Invalid axis in permutation order."};
+            new_dims[i] = dimensions_[order[i]];
+        }
+        dimensions_ = new_dims;
+        compute_strides();
+    }
+
+    } // namespace kern
+
