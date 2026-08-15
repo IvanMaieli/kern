@@ -8,10 +8,13 @@
 #include <kern/shape.hpp>
 
 namespace kern {
+    class MemoryPool;
+
     class Tensor {
     public:
         Tensor() = default;
         Tensor(const Shape& shape, const DataType dtype);
+        Tensor(const Shape& shape, const DataType dtype, MemoryPool& pool);
 
         ~Tensor();
 
@@ -23,17 +26,17 @@ namespace kern {
         explicit Tensor(Tensor&& other) noexcept;
         Tensor& operator=(Tensor&& other) noexcept;
 
-        const Shape& shape() const { return shape_; }
-        DataType dtype() const { return dtype_; }
-        size_t size_bytes() const noexcept { return capacity_; };
-        void* data() { return data_; }                  // For non-const purposes
-        const void* data() const { return data_; }      // For const purposes
+        [[nodiscard]] const Shape& shape() const { return shape_; }
+        [[nodiscard]] DataType dtype() const { return dtype_; }
+        [[nodiscard]] size_t size_bytes() const noexcept { return capacity_; }
+        [[nodiscard]] void* data() { return data_; }                                // For non-const purposes
+        [[nodiscard]] const void* data() const { return data_; }                    // For const purposes
     private:
         Shape shape_;
         DataType dtype_;
         void* data_;
         size_t capacity_;
-        void release();                                 // Free helper
-
+        MemoryPool* pool_ = nullptr;
+        void release();                                                             // Free helper
     };
 }

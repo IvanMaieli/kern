@@ -38,7 +38,7 @@ void test_memory_pool_oom() {
     // Should throw bad_alloc if we exceed capacity
     bool caught = false;
     try {
-        pool.allocate(200);
+        auto _t = pool.allocate(200);
     } catch (const std::bad_alloc&) {
         caught = true;
     }

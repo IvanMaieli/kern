@@ -19,7 +19,7 @@ namespace kern {
         MemoryPool& operator=(const MemoryPool&) = delete;
 
         // Allocate a 64-byte aligned block
-        void* allocate(size_t size);
+        [[nodiscard]] void* allocate(size_t size);
 
         // Reset the pool
         void reset();
