@@ -7,11 +7,10 @@
 namespace kern {
 
     MemoryPool::MemoryPool(const size_t total_size)
-        : total_size_(total_size), current_offset_(0) {
+        : total_size_((total_size + ALIGNMENT - 1) & ~(ALIGNMENT - 1)), current_offset_(0) {
         // Allocate the large block aligned to ALIGNMENT bytes
-        pool_start_ = std::aligned_alloc(ALIGNMENT, total_size);
+        pool_start_ = std::aligned_alloc(ALIGNMENT, total_size_);
         if (!pool_start_) throw std::bad_alloc();
-
     }
 
     MemoryPool::~MemoryPool() {

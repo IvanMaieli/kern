@@ -1,6 +1,7 @@
 #include <kern/tensor.hpp>
 #include <kern/dtype.hpp>
 #include <kern/shape.hpp>
+#include <kern/memory_pool.hpp>
 #include "test_macros.hpp"
 #include "tests.hpp"
 

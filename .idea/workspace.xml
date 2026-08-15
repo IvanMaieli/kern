@@ -28,14 +28,13 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="tensor testing implementation">
+    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="initial memory pool implementation">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/include/kern/shape.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/include/kern/shape.hpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/include/kern/tensor.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/include/kern/tensor.hpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/include/kern/version.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/include/kern/version.hpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/shape.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/shape.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/tensor.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/tensor.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/memory_pool.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/memory_pool.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/main.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/tensor_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/tensor_test.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/tests.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/tests.hpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -74,61 +73,61 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.9767591993987626E-12" />
-      <entry key="MS500" value="0.00456237263520749" />
-      <entry key="S2" value="0.2598948587938196" />
-      <entry key="S5" value="0.5833363976667916" />
-      <entry key="S10" value="0.7637646219004854" />
-      <entry key="S30" value="0.9140848532341862" />
-      <entry key="S60" value="0.9560778489424482" />
-      <entry key="M2" value="0.9777956463038037" />
-      <entry key="M5" value="1.012512286429276" />
-      <entry key="M10" value="1.5455450746779849" />
-      <entry key="M15" value="3.1402570112285773" />
-      <entry key="M30" value="14.293937964541648" />
-      <entry key="H1" value="49.67640705483634" />
-      <entry key="H2" value="118.34500973403576" />
-      <entry key="H4" value="203.25625098005054" />
-      <entry key="D1" value="345.2756194005989" />
-      <entry key="W1" value="381.49440792396314" />
+      <entry key="MS100" value="6.216232109989704E-149" />
+      <entry key="MS500" value="4.0550325643590445E-30" />
+      <entry key="S2" value="1.6591087716025258E-7" />
+      <entry key="S5" value="0.00661251047526651" />
+      <entry key="S10" value="0.23426390855250442" />
+      <entry key="S30" value="2.623345643337386" />
+      <entry key="S60" value="4.8451485609268286" />
+      <entry key="M2" value="6.598303712808657" />
+      <entry key="M5" value="7.965769556477955" />
+      <entry key="M10" value="8.964366569320084" />
+      <entry key="M15" value="10.664904267149943" />
+      <entry key="M30" value="21.756630075917997" />
+      <entry key="H1" value="56.931849500348044" />
+      <entry key="H2" value="125.50977481816952" />
+      <entry key="H4" value="210.5519799438615" />
+      <entry key="D1" value="353.0782512034028" />
+      <entry key="W1" value="389.4632967504796" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="1.0" />
       <entry key="MS500" value="1.0" />
-      <entry key="S2" value="1.0" />
-      <entry key="S5" value="1.0" />
-      <entry key="S10" value="1.0" />
-      <entry key="S30" value="1.0" />
-      <entry key="S60" value="1.0000000000002067" />
-      <entry key="M2" value="1.0000008764595703" />
-      <entry key="M5" value="1.008628784859628" />
-      <entry key="M10" value="1.2035382449434566" />
-      <entry key="M15" value="1.6775690916675368" />
-      <entry key="M30" value="4.248733505901163" />
-      <entry key="H1" value="11.095075514870384" />
-      <entry key="H2" value="22.825486812177996" />
-      <entry key="H4" value="36.369992845915974" />
-      <entry key="D1" value="58.4046804245522" />
-      <entry key="W1" value="63.995828613163" />
+      <entry key="S2" value="1.0000000000282883" />
+      <entry key="S5" value="1.0000603452608294" />
+      <entry key="S10" value="1.0077682212139842" />
+      <entry key="S30" value="1.1980495506872755" />
+      <entry key="S60" value="1.445027584187045" />
+      <entry key="M2" value="1.667104462797743" />
+      <entry key="M5" value="1.8578448419921192" />
+      <entry key="M10" value="2.1099376634088784" />
+      <entry key="M15" value="2.589423187906826" />
+      <entry key="M30" value="5.1356050404338465" />
+      <entry key="H1" value="11.946368006878677" />
+      <entry key="H2" value="23.67200558257843" />
+      <entry key="H4" value="37.2475085667936" />
+      <entry key="D1" value="59.37185247362305" />
+      <entry key="W1" value="64.99068871645524" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.0096852164057737" />
-      <entry key="MS500" value="0.3963887008788032" />
-      <entry key="S2" value="0.9622822271538256" />
-      <entry key="S5" value="1.4027698026386688" />
-      <entry key="S10" value="1.6556452301570155" />
-      <entry key="S30" value="1.8729705561902614" />
-      <entry key="S60" value="1.9348025978248677" />
-      <entry key="M2" value="1.9669724189832853" />
-      <entry key="M5" value="2.0166363611563134" />
-      <entry key="M10" value="2.7453035917238497" />
-      <entry key="M15" value="4.812748766773737" />
-      <entry key="M30" value="18.53364354478579" />
-      <entry key="H1" value="60.758905757324214" />
-      <entry key="H2" value="141.15720297058172" />
-      <entry key="H4" value="239.6154114632368" />
-      <entry key="D1" value="403.6773245288442" />
-      <entry key="W1" value="445.48976842876914" />
+      <entry key="MS100" value="0.004128976720942891" />
+      <entry key="MS500" value="0.3335557924194422" />
+      <entry key="S2" value="0.7599625939710629" />
+      <entry key="S5" value="0.9026776162374891" />
+      <entry key="S10" value="1.1877295294174341" />
+      <entry key="S30" value="3.7949581170267974" />
+      <entry key="S60" value="6.2714536954576285" />
+      <entry key="M2" value="8.25352438500561" />
+      <entry key="M5" value="9.817907701406767" />
+      <entry key="M10" value="11.06987888723958" />
+      <entry key="M15" value="13.248890093306002" />
+      <entry key="M30" value="26.883133950645068" />
+      <entry key="H1" value="68.8656523966102" />
+      <entry key="H2" value="149.16849776611528" />
+      <entry key="H4" value="247.7886534016506" />
+      <entry key="D1" value="412.44712351479484" />
+      <entry key="W1" value="454.453516462124" />
     </decayedShown>
   </component>
   <component name="ProjectApplicationVersion">
@@ -260,6 +259,7 @@
     <MESSAGE value="tensor.hpp declaration" />
     <MESSAGE value="tensor data structure implementation" />
     <MESSAGE value="tensor testing implementation" />
-    <option name="LAST_COMMIT_MESSAGE" value="tensor testing implementation" />
+    <MESSAGE value="initial memory pool implementation" />
+    <option name="LAST_COMMIT_MESSAGE" value="initial memory pool implementation" />
   </component>
 </project>

@@ -8,3 +8,6 @@ void test_dtype();
 void test_tensor_basics();
 void test_tensor_alignment();
 void test_tensor_move();
+void test_memory_pool_alignment();
+void test_memory_pool_reset();
+void test_memory_pool_oom();

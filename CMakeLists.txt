@@ -69,6 +69,7 @@ if(KERN_BUILD_TESTS)
             tests/shape_test.cpp
             tests/dtype_test.cpp
             tests/tensor_test.cpp
+            tests/memory_pool_test.cpp
     )
     target_link_libraries(
             kern-tests

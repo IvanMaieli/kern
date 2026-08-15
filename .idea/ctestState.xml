@@ -5,6 +5,7 @@
       <lineNumber testId="path:CMakeLists.txt test:kern.data_type" value="96" />
       <lineNumber testId="path:CMakeLists.txt test:kern.dtype" value="96" />
       <lineNumber testId="path:CMakeLists.txt test:kern.shape" value="80" />
+      <lineNumber testId="path:CMakeLists.txt test:kern.tests" value="78" />
       <lineNumber testId="path:CMakeLists.txt test:kern.version" value="66" />
     </ctestState>
   </component>
