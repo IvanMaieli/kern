@@ -1,6 +1,7 @@
 //
 // Created by Ivan Maieli on 13/08/2026.
 //
+
 #pragma once
 
 #include <string_view>

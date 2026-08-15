@@ -1,3 +1,7 @@
+#
+# Created by Ivan Maieli on 13/08/2026.
+#
+
 cmake_minimum_required(VERSION 3.25)
 
 project(
@@ -16,6 +20,8 @@ add_library(kern
         include/kern/dtype.hpp
         include/kern/tensor.hpp
         src/tensor.cpp
+        include/kern/memory_pool.hpp
+        src/memory_pool.cpp
 )
 
 add_library(kern::kern ALIAS kern)

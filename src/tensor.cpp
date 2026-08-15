@@ -5,6 +5,7 @@
 #include <kern/tensor.hpp>
 #include <kern/dtype.hpp>
 #include <kern/shape.hpp>
+#include <kern/memory_pool.hpp>
 
 namespace kern {
     namespace  {
@@ -36,7 +37,7 @@ namespace kern {
     Tensor& Tensor::operator=(Tensor&& other) noexcept {
         if (this == &other) return *this;
         release();
-        shape_ = std::move(other.shape_);
+        shape_ = other.shape_;
         dtype_ = other.dtype_;
         data_ = other.data_;
         capacity_ = other.capacity_;

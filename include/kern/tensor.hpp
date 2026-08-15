@@ -7,8 +7,6 @@
 #include <kern/dtype.hpp>
 #include <kern/shape.hpp>
 
-static constexpr size_t ALIGNMENT = 64UL;       // SIMD Alignment optimization
-
 namespace kern {
     class Tensor {
     public:
@@ -22,7 +20,7 @@ namespace kern {
         Tensor& operator=(const Tensor&) = delete;
 
         // Move semantics with '=' symbol
-        Tensor(Tensor&& other) noexcept;
+        explicit Tensor(Tensor&& other) noexcept;
         Tensor& operator=(Tensor&& other) noexcept;
 
         const Shape& shape() const { return shape_; }
