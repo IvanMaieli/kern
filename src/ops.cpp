@@ -40,11 +40,9 @@ namespace kern::ops {
 
     void Add(const Tensor& a, const Tensor& b, Tensor& out) {
         // Validate if shapes broadcast to out.shape()
-        if (GetBroadcastShape(a.shape(), b.shape()) == out.shape()) {
-             // Continue
-        } else {
-             throw std::invalid_argument("Tensors shapes are not broadcastable to out.");
-        }
+        if (GetBroadcastShape(a.shape(), b.shape()) == out.shape())
+             ; // Continue
+        else throw std::invalid_argument("Tensors shapes are not broadcastable to out.");
 
         if (a.dtype() != b.dtype() || a.dtype() != out.dtype())
             throw std::invalid_argument("Tensors must have the same dtype for Add operation.");
@@ -63,13 +61,16 @@ namespace kern::ops {
                 std::array<Shape::Dimension, Shape::maximum_rank> b_coords{};
                 
                 for(size_t axis = 0; axis < a.shape().rank(); ++axis) {
-                    a_coords[axis] = coords[axis + (out.shape().rank() - a.shape().rank())];
+                    const size_t out_axis = axis + (out.shape().rank() - a.shape().rank());
+                    a_coords[axis] = (a.shape().dimension(axis) == 1) ? 0 : coords[out_axis];
                 }
                 for(size_t axis = 0; axis < b.shape().rank(); ++axis) {
-                    b_coords[axis] = coords[axis + (out.shape().rank() - b.shape().rank())];
+                    const size_t out_axis = axis + (out.shape().rank() - b.shape().rank());
+                    b_coords[axis] = (b.shape().dimension(axis) == 1) ? 0 : coords[out_axis];
                 }
-                
+
                 out_ptr[i] = a_ptr[a.shape().linear_index(a_coords)] + b_ptr[b.shape().linear_index(b_coords)];
+
             }
         } else throw std::runtime_error("Unsupported dtype for Add operation.");
     }
