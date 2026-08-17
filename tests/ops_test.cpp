@@ -57,13 +57,40 @@ void test_ops_reshape() {
 }
 
 void test_ops_permute() {
-    kern::Shape shape_in{2, 3, 4};
-    kern::Shape shape_out{4, 2, 3};
-    kern::Tensor t_in(shape_in, kern::DataType::float32);
+    const kern::Shape shape_in{2, 3, 4};
+    const kern::Shape shape_out{4, 2, 3};
+    const kern::Tensor t_in(shape_in, kern::DataType::float32);
     kern::Tensor t_out(shape_out, kern::DataType::float32);
 
     kern::ops::Permute(t_in, {2, 0, 1}, t_out);
 
     CHECK(t_out.shape() == shape_out);
     CHECK(t_out.buffer() == t_in.buffer());
+}
+
+void test_ops_broadcast_add() {
+    const kern::Shape shape_a{2, 3};
+    const kern::Shape shape_b{1, 3};
+    const kern::Shape shape_out{2, 3};
+    
+    kern::Tensor t_a(shape_a, kern::DataType::float32);
+    kern::Tensor t_b(shape_b, kern::DataType::float32);
+    kern::Tensor t_out(shape_out, kern::DataType::float32);
+
+    auto* a_ptr = static_cast<float*>(t_a.data());
+    auto* b_ptr = static_cast<float*>(t_b.data());
+    
+    a_ptr[0] = 1.0f; a_ptr[1] = 2.0f; a_ptr[2] = 3.0f;
+    a_ptr[3] = 4.0f; a_ptr[4] = 5.0f; a_ptr[5] = 6.0f;
+    b_ptr[0] = 10.0f; b_ptr[1] = 20.0f; b_ptr[2] = 30.0f;
+
+    kern::ops::Add(t_a, t_b, t_out);
+
+    const auto* out_ptr = static_cast<float*>(t_out.data());
+    CHECK(out_ptr[0] == 11.0f);
+    CHECK(out_ptr[1] == 22.0f);
+    CHECK(out_ptr[2] == 33.0f);
+    CHECK(out_ptr[3] == 14.0f);
+    CHECK(out_ptr[4] == 25.0f);
+    CHECK(out_ptr[5] == 36.0f);
 }

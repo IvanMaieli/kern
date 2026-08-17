@@ -12,6 +12,7 @@ int main() {
     std::printf("Running tensor with pool...\n"); test_tensor_with_pool();
     std::printf("Running ops add...\n"); test_ops_add();
     std::printf("Running ops add mismatched...\n"); test_ops_add_mismatched_shape();
+    std::printf("Running ops broadcast add...\n"); test_ops_broadcast_add();
     std::printf("Running ops reshape...\n"); test_ops_reshape();
     std::printf("Running ops permute...\n"); test_ops_permute();
     std::printf("Running pool alignment...\n"); test_memory_pool_alignment();

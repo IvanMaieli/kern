@@ -17,6 +17,7 @@ namespace kern {
 
         Shape() noexcept = default;
         Shape(std::initializer_list<Dimension> dimensions);
+        explicit Shape(const std::vector<Dimension>& dimensions);
 
         [[nodiscard]] std::size_t rank() const noexcept { return rank_; }
         [[nodiscard]] bool empty() const noexcept { return rank_ == 0; }

@@ -21,6 +21,16 @@ namespace kern {
         compute_strides();
     }
 
+    Shape::Shape(const std::vector<Dimension>& dimensions) {
+        if (dimensions.size() > maximum_rank)
+            throw std::invalid_argument{"Shape rank exceeds the maximum supported rank"};
+
+        rank_ = dimensions.size();
+        for (std::size_t axis = 0; axis < rank_; ++axis)
+            dimensions_[axis] = dimensions[axis];
+        compute_strides();
+    }
+
     void Shape::compute_strides() {
         std::size_t s = 1;
         for (std::size_t i = rank_; i > 0; --i) {
@@ -45,25 +55,22 @@ namespace kern {
     std::size_t Shape::element_count() const {
         if (empty()) return 1;
         std::size_t count = 1;
-        for (std::size_t axis = 0; axis < rank_; ++axis) {
+        for (std::size_t axis = 0; axis < rank_; ++axis)
             count *= dimensions_[axis];
-        }
         return count;
     }
 
     bool Shape::operator==(const Shape& other) const noexcept {
         if (rank_ != other.rank_) return false;
-        for (std::size_t i = 0; i < rank_; ++i) {
+        for (std::size_t i = 0; i < rank_; ++i)
             if (dimensions_[i] != other.dimensions_[i]) return false;
-        }
         return true;
     }
 
     std::size_t Shape::linear_index(const std::array<Dimension, maximum_rank>& coords) const {
         std::size_t index = 0;
-        for (std::size_t axis = 0; axis < rank_; ++axis) {
+        for (std::size_t axis = 0; axis < rank_; ++axis)
             index += coords[axis] * strides_[axis];
-        }
         return index;
     }
 
@@ -89,5 +96,5 @@ namespace kern {
         compute_strides();
     }
 
-    } // namespace kern
+} // namespace kern
 
