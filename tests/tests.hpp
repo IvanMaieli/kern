@@ -13,6 +13,7 @@ void test_ops_add();
 void test_ops_add_mismatched_shape();
 void test_ops_reshape();
 void test_ops_permute();
+void test_ops_matmul();
 void test_ops_broadcast_add();
 void test_memory_pool_alignment();
 void test_memory_pool_reset();

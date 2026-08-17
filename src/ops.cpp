@@ -97,4 +97,37 @@ namespace kern::ops {
         out.set_shape(new_shape);
         out.set_buffer(in.buffer());
     }
+
+    void MatMul(const Tensor& a, const Tensor& b, Tensor& out) {
+        if (a.shape().rank() != 2 || b.shape().rank() != 2 || out.shape().rank() != 2)
+            throw std::invalid_argument("MatMul supports only 2D tensors for now.");
+        
+        const size_t M = a.shape().dimension(0);
+        const size_t K = a.shape().dimension(1);
+        const size_t K_b = b.shape().dimension(0);
+        const size_t N = b.shape().dimension(1);
+        
+        if (K != K_b)
+            throw std::invalid_argument("MatMul: Inner dimensions must match.");
+        if (M != out.shape().dimension(0) || N != out.shape().dimension(1))
+            throw std::invalid_argument("MatMul: Output shape is incompatible.");
+
+        if (a.dtype() == DataType::float32) {
+            const auto a_ptr = static_cast<const float*>(a.data());
+            const auto b_ptr = static_cast<const float*>(b.data());
+            const auto out_ptr = static_cast<float*>(out.data());
+            
+            for (size_t m = 0; m < M; ++m) {
+                for (size_t n = 0; n < N; ++n) {
+                    float sum = 0.0f;
+                    for (size_t k = 0; k < K; ++k) {
+                        // Use linear_index for safety with strides
+                        sum += a_ptr[a.shape().linear_index({m, k})] * 
+                               b_ptr[b.shape().linear_index({k, n})];
+                    }
+                    out_ptr[out.shape().linear_index({m, n})] = sum;
+                }
+            }
+        } else throw std::runtime_error("Unsupported dtype for MatMul operation.");
+    }
 } // namespace kern::ops
