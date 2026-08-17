@@ -96,32 +96,32 @@ void test_ops_broadcast_add() {
 }
 
 void test_ops_matmul() {
-    kern::Shape shape_a{2, 3};
-    kern::Shape shape_b{3, 2};
-    kern::Shape shape_out{2, 2};
+    const kern::Shape shape_a{2, 3};
+    const kern::Shape shape_b{3, 2};
+    const kern::Shape shape_out{2, 2};
     
     kern::Tensor t_a(shape_a, kern::DataType::float32);
     kern::Tensor t_b(shape_b, kern::DataType::float32);
     kern::Tensor t_out(shape_out, kern::DataType::float32);
 
-    float* a_ptr = static_cast<float*>(t_a.data());
-    float* b_ptr = static_cast<float*>(t_b.data());
+    auto* a_ptr = static_cast<float*>(t_a.data());
+    auto* b_ptr = static_cast<float*>(t_b.data());
     
     // Mat A [2x3]
     a_ptr[0] = 1.0f; a_ptr[1] = 2.0f; a_ptr[2] = 3.0f;
     a_ptr[3] = 4.0f; a_ptr[4] = 5.0f; a_ptr[5] = 6.0f;
     
     // Mat B [3x2]
-    b_ptr[0] = 7.0f; b_ptr[1] = 8.0f;
-    b_ptr[2] = 9.0f; b_ptr[3] = 10.0f;
+    b_ptr[0] = 7.0f;  b_ptr[1] = 8.0f;
+    b_ptr[2] = 9.0f;  b_ptr[3] = 10.0f;
     b_ptr[4] = 11.0f; b_ptr[5] = 12.0f;
 
     kern::ops::MatMul(t_a, t_b, t_out);
 
-    float* out_ptr = static_cast<float*>(t_out.data());
-    // Row 0: 1*7+2*9+3*11 = 7+18+33 = 58
-    // Row 0: 1*8+2*10+3*12 = 8+20+36 = 64
-    // Row 1: 4*7+5*9+6*11 = 28+45+66 = 139
+    const auto* out_ptr = static_cast<float*>(t_out.data());
+    // Row 0: 1*7+2*9+3*11  = 7+18+33  = 58
+    // Row 0: 1*8+2*10+3*12 = 8+20+36  = 64
+    // Row 1: 4*7+5*9+6*11  = 28+45+66 = 139
     // Row 1: 4*8+5*10+6*12 = 32+50+72 = 154
     CHECK(out_ptr[0] == 58.0f);
     CHECK(out_ptr[1] == 64.0f);
