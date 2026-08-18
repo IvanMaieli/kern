@@ -16,6 +16,8 @@ void test_ops_permute();
 void test_ops_matmul();
 void test_ops_relu();
 void test_ops_gelu();
+void test_ops_softmax();
+void test_ops_layernorm();
 void test_ops_broadcast_add();
 void test_memory_pool_alignment();
 void test_memory_pool_reset();

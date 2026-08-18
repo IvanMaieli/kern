@@ -161,3 +161,40 @@ void test_ops_gelu() {
     // GELU(0) should be 0
     CHECK(std::abs(out_ptr[0]) < 1e-5f);
 }
+
+void test_ops_softmax() {
+    kern::Shape shape{1, 3};
+    kern::Tensor t_in(shape, kern::DataType::float32);
+    kern::Tensor t_out(shape, kern::DataType::float32);
+
+    float* in_ptr = static_cast<float*>(t_in.data());
+    in_ptr[0] = 1.0f; in_ptr[1] = 2.0f; in_ptr[2] = 3.0f;
+
+    kern::ops::Softmax(t_in, t_out);
+
+    float* out_ptr = static_cast<float*>(t_out.data());
+    // Softmax([1, 2, 3]) = [e^1, e^2, e^3] / sum(e^1, e^2, e^3)
+    // approx: [0.09, 0.24, 0.67]
+    CHECK(out_ptr[0] > 0.0f && out_ptr[0] < 0.1f);
+    CHECK(out_ptr[1] > 0.2f && out_ptr[1] < 0.3f);
+    CHECK(out_ptr[2] > 0.6f && out_ptr[2] < 0.7f);
+}
+
+void test_ops_layernorm() {
+    kern::Shape shape{1, 4};
+    kern::Tensor t_in(shape, kern::DataType::float32);
+    kern::Tensor t_out(shape, kern::DataType::float32);
+
+    float* in_ptr = static_cast<float*>(t_in.data());
+    in_ptr[0] = 1.0f; in_ptr[1] = 2.0f; in_ptr[2] = 3.0f; in_ptr[3] = 4.0f;
+
+    kern::ops::LayerNorm(t_in, t_out);
+
+    float* out_ptr = static_cast<float*>(t_out.data());
+    // Mean = 2.5
+    // Var = [(1-2.5)^2 + (2-2.5)^2 + (3-2.5)^2 + (4-2.5)^2] / 4
+    //     = [2.25 + 0.25 + 0.25 + 2.25] / 4 = 1.25
+    // Std = sqrt(1.25) approx 1.118
+    // Result = (x - 2.5) / 1.118
+    CHECK(std::abs(out_ptr[0] - (-1.34164f)) < 1e-4f);
+}

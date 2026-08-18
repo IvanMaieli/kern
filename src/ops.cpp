@@ -131,14 +131,14 @@ namespace kern::ops {
     }
 
     void ReLU(const Tensor& in, Tensor& out) {
-        if (in.shape() != out.shape())
+        if (!(in.shape() == out.shape()))
             throw std::invalid_argument("ReLU: Shapes must match.");
 
         if (in.dtype() == DataType::float32) {
             const auto* in_ptr = static_cast<const float*>(in.data());
             auto* out_ptr = static_cast<float*>(out.data());
             const size_t n = in.shape().element_count();
-            
+
             for (size_t i = 0; i < n; ++i) {
                 out_ptr[i] = std::max(0.0f, in_ptr[i]);
             }
@@ -146,7 +146,7 @@ namespace kern::ops {
     }
 
     void GELU(const Tensor& in, Tensor& out) {
-        if (in.shape() != out.shape())
+        if (!(in.shape() == out.shape()))
             throw std::invalid_argument("GELU: Shapes must match.");
 
         if (in.dtype() == DataType::float32) {
@@ -159,10 +159,74 @@ namespace kern::ops {
 
             for (size_t i = 0; i < n; ++i) {
                 float x = in_ptr[i];
-                const float x3 = x * x * x;
-                const float tanh_arg = k1 * (x + k2 * x3);
+                float x3 = x * x * x;
+                float tanh_arg = k1 * (x + k2 * x3);
                 out_ptr[i] = 0.5f * x * (1.0f + std::tanh(tanh_arg));
             }
         } else throw std::runtime_error("Unsupported dtype for GELU operation.");
     }
-} // namespace kern::ops
+
+    void Softmax(const Tensor& in, Tensor& out) {
+        if (!(in.shape() == out.shape()))
+            throw std::invalid_argument("Softmax: Shapes must match.");
+
+        const size_t rank = in.shape().rank();
+        const size_t last_dim = in.shape().dimension(rank - 1);
+        const size_t num_rows = in.shape().element_count() / last_dim;
+
+        const auto in_ptr = static_cast<const float*>(in.data());
+        auto* out_ptr = static_cast<float*>(out.data());
+
+        for (size_t i = 0; i < num_rows; ++i) {
+            const float* row_in = in_ptr + i * last_dim;
+            float* row_out = out_ptr + i * last_dim;
+
+            float max_val = -std::numeric_limits<float>::infinity();
+            for (size_t j = 0; j < last_dim; ++j) max_val = std::max(max_val, row_in[j]);
+
+            float sum = 0.0f;
+            for (size_t j = 0; j < last_dim; ++j) {
+                row_out[j] = std::exp(row_in[j] - max_val);
+                sum += row_out[j];
+            }
+
+            for (size_t j = 0; j < last_dim; ++j) row_out[j] /= sum;
+        }
+    }
+
+    void LayerNorm(const Tensor& in, Tensor& out) {
+        if (!(in.shape() == out.shape()))
+            throw std::invalid_argument("LayerNorm: Shapes must match.");
+
+        const size_t rank = in.shape().rank();
+        const size_t last_dim = in.shape().dimension(rank - 1);
+        const size_t num_rows = in.shape().element_count() / last_dim;
+
+        const auto in_ptr = static_cast<const float*>(in.data());
+        auto* out_ptr = static_cast<float*>(out.data());
+
+        const float eps = 1e-5f;
+
+        for (size_t i = 0; i < num_rows; ++i) {
+            const float* row_in = in_ptr + i * last_dim;
+            float* row_out = out_ptr + i * last_dim;
+
+            float mean = 0.0f;
+            for (size_t j = 0; j < last_dim; ++j) mean += row_in[j];
+            mean /= static_cast<float>(last_dim);
+
+            float var = 0.0f;
+            for (size_t j = 0; j < last_dim; ++j) {
+                const float diff = row_in[j] - mean;
+                var += diff * diff;
+            }
+            var /= static_cast<float>(last_dim);
+
+            const float inv_std = 1.0f / std::sqrt(var + eps);
+            for (size_t j = 0; j < last_dim; ++j) {
+                row_out[j] = (row_in[j] - mean) * inv_std;
+            }
+        }
+    }
+    } // namespace kern::ops
+

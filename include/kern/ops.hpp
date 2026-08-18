@@ -14,6 +14,8 @@ namespace kern::ops {
     void MatMul(const Tensor& a, const Tensor& b, Tensor& out);
     void ReLU(const Tensor& in, Tensor& out);
     void GELU(const Tensor& in, Tensor& out);
+    void Softmax(const Tensor& in, Tensor& out);
+    void LayerNorm(const Tensor& in, Tensor& out);
     Shape GetBroadcastShape(const Shape& a, const Shape& b);
 
 } // namespace kern::ops
