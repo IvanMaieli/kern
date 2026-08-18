@@ -1,7 +1,9 @@
 #include <kern/ops.hpp>
 #include <stdexcept>
+#include <cstring>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 namespace kern::ops {
 
@@ -40,9 +42,8 @@ namespace kern::ops {
 
     void Add(const Tensor& a, const Tensor& b, Tensor& out) {
         // Validate if shapes broadcast to out.shape()
-        if (GetBroadcastShape(a.shape(), b.shape()) == out.shape())
-             ; // Continue
-        else throw std::invalid_argument("Tensors shapes are not broadcastable to out.");
+        if (GetBroadcastShape(a.shape(), b.shape()) != out.shape())
+             throw std::invalid_argument("Tensors shapes are not broadcastable to out.");
 
         if (a.dtype() != b.dtype() || a.dtype() != out.dtype())
             throw std::invalid_argument("Tensors must have the same dtype for Add operation.");
@@ -61,16 +62,15 @@ namespace kern::ops {
                 std::array<Shape::Dimension, Shape::maximum_rank> b_coords{};
                 
                 for(size_t axis = 0; axis < a.shape().rank(); ++axis) {
-                    const size_t out_axis = axis + (out.shape().rank() - a.shape().rank());
+                    size_t out_axis = axis + (out.shape().rank() - a.shape().rank());
                     a_coords[axis] = (a.shape().dimension(axis) == 1) ? 0 : coords[out_axis];
                 }
                 for(size_t axis = 0; axis < b.shape().rank(); ++axis) {
-                    const size_t out_axis = axis + (out.shape().rank() - b.shape().rank());
+                    size_t out_axis = axis + (out.shape().rank() - b.shape().rank());
                     b_coords[axis] = (b.shape().dimension(axis) == 1) ? 0 : coords[out_axis];
                 }
-
+                
                 out_ptr[i] = a_ptr[a.shape().linear_index(a_coords)] + b_ptr[b.shape().linear_index(b_coords)];
-
             }
         } else throw std::runtime_error("Unsupported dtype for Add operation.");
     }
@@ -121,7 +121,6 @@ namespace kern::ops {
                 for (size_t n = 0; n < N; ++n) {
                     float sum = 0.0f;
                     for (size_t k = 0; k < K; ++k) {
-                        // Use linear_index for safety with strides
                         sum += a_ptr[a.shape().linear_index({m, k})] * 
                                b_ptr[b.shape().linear_index({k, n})];
                     }
@@ -129,5 +128,41 @@ namespace kern::ops {
                 }
             }
         } else throw std::runtime_error("Unsupported dtype for MatMul operation.");
+    }
+
+    void ReLU(const Tensor& in, Tensor& out) {
+        if (in.shape() != out.shape())
+            throw std::invalid_argument("ReLU: Shapes must match.");
+
+        if (in.dtype() == DataType::float32) {
+            const auto* in_ptr = static_cast<const float*>(in.data());
+            auto* out_ptr = static_cast<float*>(out.data());
+            const size_t n = in.shape().element_count();
+            
+            for (size_t i = 0; i < n; ++i) {
+                out_ptr[i] = std::max(0.0f, in_ptr[i]);
+            }
+        } else throw std::runtime_error("Unsupported dtype for ReLU operation.");
+    }
+
+    void GELU(const Tensor& in, Tensor& out) {
+        if (in.shape() != out.shape())
+            throw std::invalid_argument("GELU: Shapes must match.");
+
+        if (in.dtype() == DataType::float32) {
+            const auto* in_ptr = static_cast<const float*>(in.data());
+            auto* out_ptr = static_cast<float*>(out.data());
+            const size_t n = in.shape().element_count();
+
+            const float k1 = 0.7978845608f; // sqrt(2/pi)
+            const float k2 = 0.044715f;
+
+            for (size_t i = 0; i < n; ++i) {
+                float x = in_ptr[i];
+                const float x3 = x * x * x;
+                const float tanh_arg = k1 * (x + k2 * x3);
+                out_ptr[i] = 0.5f * x * (1.0f + std::tanh(tanh_arg));
+            }
+        } else throw std::runtime_error("Unsupported dtype for GELU operation.");
     }
 } // namespace kern::ops

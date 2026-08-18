@@ -13,6 +13,8 @@ int main() {
     std::printf("Running ops add...\n"); test_ops_add();
     std::printf("Running ops add mismatched...\n"); test_ops_add_mismatched_shape();
     std::printf("Running ops matmul...\n"); test_ops_matmul();
+    std::printf("Running ops relu...\n"); test_ops_relu();
+    std::printf("Running ops gelu...\n"); test_ops_gelu();
     std::printf("Running ops broadcast add...\n"); test_ops_broadcast_add();
     std::printf("Running ops reshape...\n"); test_ops_reshape();
     std::printf("Running ops permute...\n"); test_ops_permute();

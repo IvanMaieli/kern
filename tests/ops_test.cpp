@@ -129,3 +129,35 @@ void test_ops_matmul() {
     CHECK(out_ptr[2] == 139.0f);
     CHECK(out_ptr[3] == 154.0f);
 }
+
+void test_ops_relu() {
+    kern::Shape shape{2, 2};
+    kern::Tensor t_in(shape, kern::DataType::float32);
+    kern::Tensor t_out(shape, kern::DataType::float32);
+
+    float* in_ptr = static_cast<float*>(t_in.data());
+    in_ptr[0] = -1.0f; in_ptr[1] = 0.0f; in_ptr[2] = 1.0f; in_ptr[3] = 2.0f;
+
+    kern::ops::ReLU(t_in, t_out);
+
+    float* out_ptr = static_cast<float*>(t_out.data());
+    CHECK(out_ptr[0] == 0.0f);
+    CHECK(out_ptr[1] == 0.0f);
+    CHECK(out_ptr[2] == 1.0f);
+    CHECK(out_ptr[3] == 2.0f);
+}
+
+void test_ops_gelu() {
+    kern::Shape shape{1};
+    kern::Tensor t_in(shape, kern::DataType::float32);
+    kern::Tensor t_out(shape, kern::DataType::float32);
+
+    float* in_ptr = static_cast<float*>(t_in.data());
+    in_ptr[0] = 0.0f; 
+
+    kern::ops::GELU(t_in, t_out);
+
+    float* out_ptr = static_cast<float*>(t_out.data());
+    // GELU(0) should be 0
+    CHECK(std::abs(out_ptr[0]) < 1e-5f);
+}
