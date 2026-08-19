@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <arm_neon.h>
+#include <thread>
 
 namespace kern::ops {
 
@@ -50,16 +51,16 @@ namespace kern::ops {
         // Fast SIMD path: requires contiguous and non-aliased buffers for safe vectorization
         if (a.dtype() == DataType::float32 && a.shape() == b.shape() && a.shape() == out.shape() &&
             !Tensor::is_aliased(a, out) && !Tensor::is_aliased(b, out)) {
-            const float* __restrict a_ptr = static_cast<const float*>(a.data());
-            const float* __restrict b_ptr = static_cast<const float*>(b.data());
-            float* __restrict out_ptr = static_cast<float*>(out.data());
+            auto a_ptr = static_cast<const float*>(a.data());
+            auto b_ptr = static_cast<const float*>(b.data());
+            auto* __restrict out_ptr = static_cast<float*>(out.data());
             const size_t n = out.shape().element_count();
 
             size_t i = 0;
             for (; i + 3 < n; i += 4) {
-                float32x4_t va = vld1q_f32(a_ptr + i);
-                float32x4_t vb = vld1q_f32(b_ptr + i);
-                float32x4_t vout = vaddq_f32(va, vb);
+                const float32x4_t va = vld1q_f32(a_ptr + i);
+                const float32x4_t vb = vld1q_f32(b_ptr + i);
+                const float32x4_t vout = vaddq_f32(va, vb);
                 vst1q_f32(out_ptr + i, vout);
             }
             for (; i < n; ++i) out_ptr[i] = a_ptr[i] + b_ptr[i];
@@ -120,32 +121,75 @@ namespace kern::ops {
     void MatMul(const Tensor& a, const Tensor& b, Tensor& out) {
         if (a.shape().rank() != 2 || b.shape().rank() != 2 || out.shape().rank() != 2)
             throw std::invalid_argument("MatMul supports only 2D tensors for now.");
-        
+
         const size_t M = a.shape().dimension(0);
         const size_t K = a.shape().dimension(1);
         const size_t K_b = b.shape().dimension(0);
         const size_t N = b.shape().dimension(1);
-        
+
         if (K != K_b)
             throw std::invalid_argument("MatMul: Inner dimensions must match.");
         if (M != out.shape().dimension(0) || N != out.shape().dimension(1))
             throw std::invalid_argument("MatMul: Output shape is incompatible.");
 
         if (a.dtype() == DataType::float32) {
-            const float* __restrict a_ptr = static_cast<const float*>(a.data());
-            const float* __restrict b_ptr = static_cast<const float*>(b.data());
-            float* __restrict out_ptr = static_cast<float*>(out.data());
+            const auto a_ptr = static_cast<const float*>(a.data());
+            auto b_ptr = static_cast<const float*>(b.data());
+            auto* __restrict out_ptr = static_cast<float*>(out.data());
 
-            for (size_t m = 0; m < M; ++m) {
-                for (size_t k = 0; k < K; ++k) {
-                    const float a_val = a_ptr[a.shape().linear_index({m, k})];
-                    for (size_t n = 0; n < N; ++n) {
-                        out_ptr[out.shape().linear_index({m, n})] += a_val * 
-                               b_ptr[b.shape().linear_index({k, n})];
+            unsigned int num_threads = std::thread::hardware_concurrency();
+            if (num_threads == 0) num_threads = 2;
+            std::vector<std::jthread> threads;
+
+            // Parallelize over M rows
+            const size_t rows_per_thread = (M + num_threads - 1) / num_threads;
+
+            for (unsigned int t = 0; t < num_threads; ++t) {
+                const size_t m_start = t * rows_per_thread;
+                const size_t m_end = std::min(m_start + rows_per_thread, M);
+
+                if (m_start >= m_end) break;
+
+                threads.emplace_back([=, &a, &b, &out]() {
+                    // Tiled + SIMD MatMul implementation for a range of m
+                    for (size_t m_tile = m_start; m_tile < m_end; m_tile += TILE_SIZE) {
+                        for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+                            for (size_t n_tile = 0; n_tile < N; n_tile += TILE_SIZE) {
+
+                                for (size_t m = m_tile; m < std::min(m_tile + TILE_SIZE, m_end); ++m) {
+                                    for (size_t k = k_tile; k < std::min(k_tile + TILE_SIZE, K); ++k) {
+                                        const float a_val = a_ptr[a.shape().linear_index({m, k})];
+                                        const float32x4_t va_val = vdupq_n_f32(a_val);
+
+                                        size_t n = n_tile;
+                                        const size_t n_end = std::min(n_tile + TILE_SIZE, N);
+
+                                        // Vectorized loop over n - Unrolled by 2
+                                        for (; n + 7 < n_end; n += 8) {
+                                            // Pair 1
+                                            const float32x4_t vb1 = vld1q_f32(b_ptr + b.shape().linear_index({k, n}));
+                                            float32x4_t vout1 = vld1q_f32(out_ptr + out.shape().linear_index({m, n}));
+                                            vout1 = vfmaq_f32(vout1, va_val, vb1);
+                                            vst1q_f32(out_ptr + out.shape().linear_index({m, n}), vout1);
+
+                                            // Pair 2
+                                            const float32x4_t vb2 = vld1q_f32(b_ptr + b.shape().linear_index({k, n + 4}));
+                                            float32x4_t vout2 = vld1q_f32(out_ptr + out.shape().linear_index({m, n + 4}));
+                                            vout2 = vfmaq_f32(vout2, va_val, vb2);
+                                            vst1q_f32(out_ptr + out.shape().linear_index({m, n + 4}), vout2);
+                                        }
+                                        // Cleanup loop
+                                        for (; n < n_end; ++n) {
+                                            out_ptr[out.shape().linear_index({m, n})] += a_val * 
+                                                   b_ptr[b.shape().linear_index({k, n})];
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                }
+                });
             }
-
         } else throw std::runtime_error("Unsupported dtype for MatMul operation.");
     }
 
@@ -167,8 +211,8 @@ namespace kern::ops {
             throw std::invalid_argument("GELU: Shapes must match.");
 
         if (in.dtype() == DataType::float32) {
-            const float* __restrict in_ptr = static_cast<const float*>(in.data());
-            float* __restrict out_ptr = static_cast<float*>(out.data());
+            const auto in_ptr = static_cast<const float*>(in.data());
+            auto* __restrict out_ptr = static_cast<float*>(out.data());
             const size_t n = in.shape().element_count();
             const float k1 = 0.7978845608f; // sqrt(2/pi)
             const float k2 = 0.044715f;
@@ -190,8 +234,8 @@ namespace kern::ops {
         const size_t last_dim = in.shape().dimension(rank - 1);
         const size_t num_rows = in.shape().element_count() / last_dim;
 
-        const float* __restrict in_ptr = static_cast<const float*>(in.data());
-        float* __restrict out_ptr = static_cast<float*>(out.data());
+        const auto in_ptr = static_cast<const float*>(in.data());
+        auto* __restrict out_ptr = static_cast<float*>(out.data());
 
         for (size_t i = 0; i < num_rows; ++i) {
             const float* row_in = in_ptr + i * last_dim;
@@ -218,8 +262,8 @@ namespace kern::ops {
         const size_t last_dim = in.shape().dimension(rank - 1);
         const size_t num_rows = in.shape().element_count() / last_dim;
 
-        const float* __restrict in_ptr = static_cast<const float*>(in.data());
-        float* __restrict out_ptr = static_cast<float*>(out.data());
+        const auto in_ptr = static_cast<const float*>(in.data());
+        auto* __restrict out_ptr = static_cast<float*>(out.data());
 
         const float eps = 1e-5f;
 
