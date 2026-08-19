@@ -77,6 +77,7 @@ if(KERN_BUILD_TESTS)
             tests/tensor_test.cpp
             tests/memory_pool_test.cpp
             tests/ops_test.cpp
+            tests/bench_test.cpp
     )
     target_link_libraries(
             kern-tests

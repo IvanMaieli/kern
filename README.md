@@ -1,83 +1,54 @@
-# Kern Inference Engine
+# Kern: High-Performance Inference Engine for Apple Silicon
 
-Kern is a lightweight, high-performance C++20 inference engine meticulously engineered for Apple Silicon (M-series) architectures. The engine is designed to minimize runtime overhead by prioritizing deterministic memory management, cache-aligned data structures, and copy-free tensor operations.
+Kern is a high-performance C++20 inference engine meticulously engineered from the ground up for Apple Silicon (M-series). It is designed to bridge the gap between high-level machine learning frameworks and raw hardware performance.
 
 ## Design Philosophy
 
-Kern adheres to a strict set of architectural principles designed for performance and reliability in constrained environments:
+Kern is built on the belief that peak inference performance requires full control over the memory layout and the CPU execution pipeline. Our core tenets are:
 
-1.  **Deterministic Memory Management (RAII):** We eliminate unpredictable memory fragmentation and runtime `free()` latency. By using a custom linear `MemoryPool` and a centralized `Buffer` management system, we ensure that memory lifecycles are explicitly defined and managed.
-2.  **Copy-Free View Semantics:** Transformations such as `Reshape`, `Transpose`, and `Permute` are implemented as zero-copy "view" operations. By decoupling the `Tensor` (metadata: `Shape` and `Strides`) from the `Buffer` (data), we manipulate views without duplicating underlying data.
-3.  **Hardware-Aware Performance:** All memory allocations are strictly aligned to 64-byte boundaries, conforming to the SIMD alignment requirements and cache line architecture of Apple Silicon.
-
----
-
-## Architectural Implementation Details
-
-### Memory Ownership and Sharing
-To facilitate copy-free views, Kern implements a robust memory ownership model:
-*   **Buffer Class:** Acting as the single source of truth, `Buffer` manages the raw memory block. It handles allocation via `std::aligned_alloc` and deallocation via `std::free`.
-*   **Reference Counting:** We utilize `std::shared_ptr<Buffer>` within each `Tensor`. This allows multiple tensor "views" to coexist and share the same memory buffer safely. The `Buffer` object only releases its underlying memory when the final `shared_ptr` referencing it is destroyed.
-*   **Ownership Flag:** The `owns_` boolean within `Buffer` distinguishes between memory managed by the `Buffer` object itself and externally managed memory (e.g., from a `MemoryPool`), preventing double-free scenarios.
-
-### Multidimensional Metadata (Shape & Strides)
-Kern handles N-dimensional tensors through a stride-based mapping:
-*   **Stride-based Indexing:** Instead of relying on contiguity, every `Shape` tracks a `strides_` array. This allows the `linear_index` calculation to map N-dimensional coordinates `(c0, c1, ..., cN)` to a flat 1D memory index.
-*   **Permutation/Transpose:** By updating the `Shape` metadata and swapping stride/dimension values, operations like `Transpose` or `Permute` reconfigure the mapping without touching the physical buffer.
-
-### Broadcasting Logic
-The engine supports automatic broadcasting during binary operations (e.g., `Add`).
-*   **Stride-Zero Broadcasting:** To broadcast a dimension of size 1 to size N, we set the stride of that dimension to 0. During index calculation, this effectively "freezes" the pointer for that dimension, allowing the engine to read the same memory location repeatedly across the broadcasted axis without extra data movement.
+*   **Deterministic Memory Lifecycle:** In inference, memory fragmentation is the enemy of latency. We avoid unpredictable runtime allocations through a custom `MemoryPool` and an RAII-based `Buffer` management system. Memory is allocated once (or managed explicitly) and reused.
+*   **Zero-Copy View Semantics:** Most inference operations (Reshape, Transpose, Permute) shouldn't touch the data; they should only change how the data is *interpreted*. Kern achieves this by decoupling metadata (`Shape` and `Strides`) from the data buffer, allowing complex structural transformations to happen at zero cost.
+*   **Cache Locality:** Modern CPUs are faster than RAM. Kern optimizes performance not just by reducing operations, but by optimizing memory access patterns (Loop Reordering and Tiling) to ensure data stays within the CPU's L1/L2 caches for as long as possible.
 
 ---
 
-## Project Structure
+## Architectural Deep Dive
 
-*   `app/`: Reference implementations and application-level logic.
-*   `include/kern/`: Public APIs defining core abstractions:
-    *   `Tensor`: Lightweight container for metadata and buffer references.
-    *   `Buffer`: Reference-counted memory container.
-    *   `MemoryPool`: Linear allocator for zero-overhead batch allocations.
-    *   `Shape`: Metadata translator handling strides and N-dimensional mapping.
-    *   `ops/`: Mathematical operators.
-*   `src/`: Core implementation logic.
-*   `tests/`: Comprehensive unit test suite, including alignment validation, ownership semantics, and operator correctness.
+### 1. Metadata and Stride-based Indexing
+Kern handles N-dimensional tensors through a sophisticated stride-based mapping. Instead of enforcing memory contiguity, every `Tensor` maintains a `Shape` object containing `dimensions_` and `strides_`.
+The linear index for any coordinate $(c_0, c_1, ..., c_N)$ is calculated as:
+$$ Index = \sum_{i=0}^{N} (c_i \times stride_i) $$
+This allows the engine to represent non-contiguous views (e.g., a transposed matrix) as a standard tensor, delegating the complexity to the index calculation rather than moving physical bytes.
+
+### 2. Broadcasting via Stride-Zero
+To support flexible arithmetic, we implemented a robust broadcasting mechanism. When a dimension needs to be "broadcasted" (e.g., adding a vector `[1, 1024]` to a matrix `[32, 1024]`), we set the `stride` of the broadcasted dimension to **0**.
+During the index calculation, the coordinate for that axis is multiplied by 0, effectively "freezing" the pointer at the same memory location for that dimension. This allows the engine to broadcast shapes without any data duplication or extra memory allocation.
+
+### 3. Memory Safety and Aliasing
+We implement a functional-style interface where the user defines the destination tensor. To maximize efficiency, we added an `is_aliased` check. This allows our element-wise kernels (Add, ReLU, GELU) to safely detect when input and output buffers overlap (in-place operations), preventing expensive allocations in memory-constrained scenarios while maintaining mathematical safety for structural operators (MatMul, Permute).
 
 ---
 
-## Build and Usage
+## Operators Implementation
 
-### Requirements
-*   Compiler supporting C++20 (Clang recommended).
-*   CMake 3.25+.
-*   Ninja (recommended).
+Our operator library is designed to be highly modular, with all kernels placed in the `kern::ops` namespace.
 
-### Build Instructions
-```bash
-mkdir build && cd build
-cmake .. -G Ninja
-ninja
-./kern-tests
-```
+*   **MatMul:** The engine's powerhouse. We utilize an optimized `m-k-n` loop ordering. By reordering the inner loop from the traditional `n` (column) to `n` (sequential access to B's rows), we ensure sequential memory access, drastically improving the CPU cache hit rate.
+*   **Activation Functions:** Foundational units like `ReLU` and `GELU` (using a fast `tanh` approximation) are implemented as highly parallelizable element-wise kernels.
+*   **Reduction Operators:** `Softmax` and `LayerNorm` introduce the concept of "reduction" (aggregating multiple values). `Softmax` includes a "Max Trick" for numerical stability to prevent overflows in exponentiation.
 
-### Usage Example
-```cpp
-#include <kern/tensor.hpp>
-#include <kern/memory_pool.hpp>
-#include <kern/ops.hpp>
+---
 
-kern::MemoryPool pool(1024);
-kern::Shape shape_a{2, 3};
-kern::Shape shape_b{1, 3}; // Compatible for broadcasting
-kern::Tensor t_a(shape_a, kern::DataType::float32, pool);
-kern::Tensor t_b(shape_b, kern::DataType::float32, pool);
-kern::Tensor t_out({2, 3}, kern::DataType::float32, pool);
+## Performance & Optimization Strategy
 
-// Broadcast Add: t_b is effectively stretched to [2, 3]
-kern::ops::Add(t_a, t_b, t_out);
-```
+1.  **Restrict Pointers:** All raw data pointers are decorated with `__restrict`. This tells the compiler that the memory regions do not overlap, enabling more aggressive vectorization and SIMD instruction generation.
+2.  **64-Byte Alignment:** All memory buffers are aligned to 64-byte boundaries, matching the cache line size of Apple Silicon and the requirement for optimal NEON SIMD loading.
+3.  **Benchmarking Infrastructure:** We utilize `std::chrono` for micro-benchmarking core operators to track performance regressions and validate the impact of optimization techniques like SIMD and Tiling.
 
-## Developer Notes
+---
 
-*   **Memory Safety:** The engine utilizes `[[nodiscard]]` to prevent accidental resource leaks or ignored results.
-*   **Adding Operators:** All new operators must be defined within the `kern::ops` namespace. Favor functional-style operators that accept an output tensor reference, allowing the user to dictate memory allocation policies.
+## Roadmap for Future Development
+
+*   **SIMD Vectorization:** Explicit implementation of ARM NEON intrinsics (`vld1q_f32`, `vaddq_f32`, `vfmaq_f32`) for all kernels to achieve theoretical peak hardware utilization.
+*   **Advanced MatMul:** Implementation of Cache Tiling to further minimize RAM roundtrips for large matrices.
+*   **Graph Execution Engine:** Moving from manually called operators to a `Session` object that compiles and executes an entire model graph with optimal scheduling.

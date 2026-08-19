@@ -33,6 +33,10 @@ namespace kern {
         [[nodiscard]] const void* data() const { return buffer_ ? buffer_->data() : nullptr; }
         [[nodiscard]] std::shared_ptr<Buffer> buffer() const { return buffer_; }
         
+        static bool is_aliased(const Tensor& a, const Tensor& out) {
+            return a.buffer() == out.buffer();
+        }
+        
         void set_shape(const Shape& shape) { shape_ = shape; }
         void set_buffer(const std::shared_ptr<Buffer> &buffer) { buffer_ = buffer; }
 

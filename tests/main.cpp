@@ -18,6 +18,7 @@ int main() {
     std::printf("Running ops softmax...\n"); test_ops_softmax();
     std::printf("Running ops layernorm...\n"); test_ops_layernorm();
     std::printf("Running ops broadcast add...\n"); test_ops_broadcast_add();
+    std::printf("Running bench matmul...\n"); test_bench_matmul();
     std::printf("Running ops reshape...\n"); test_ops_reshape();
     std::printf("Running ops permute...\n"); test_ops_permute();
     std::printf("Running pool alignment...\n"); test_memory_pool_alignment();

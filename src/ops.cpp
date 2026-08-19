@@ -49,15 +49,17 @@ namespace kern::ops {
             throw std::invalid_argument("Tensors must have the same dtype for Add operation.");
 
         if (a.dtype() == DataType::float32) {
-            const auto a_ptr = static_cast<const float*>(a.data());
-            const auto b_ptr = static_cast<const float*>(b.data());
-            const auto out_ptr = static_cast<float*>(out.data());
+            const float* __restrict a_ptr = static_cast<const float*>(a.data());
+            const float* __restrict b_ptr = static_cast<const float*>(b.data());
+            float* __restrict out_ptr = static_cast<float*>(out.data());
             const size_t n = out.shape().element_count();
             
+            // For simple element-wise add, in-place is safe as long as we don't need
+            // the original values of a or b for subsequent operations.
+            // With this loop structure, it is always safe.
             for (size_t i = 0; i < n; ++i) {
                 auto coords = get_coords(i, out.shape());
                 
-                // Need to adjust coords for a and b if their rank is smaller
                 std::array<Shape::Dimension, Shape::maximum_rank> a_coords{};
                 std::array<Shape::Dimension, Shape::maximum_rank> b_coords{};
                 
@@ -113,20 +115,21 @@ namespace kern::ops {
             throw std::invalid_argument("MatMul: Output shape is incompatible.");
 
         if (a.dtype() == DataType::float32) {
-            const auto a_ptr = static_cast<const float*>(a.data());
-            const auto b_ptr = static_cast<const float*>(b.data());
-            const auto out_ptr = static_cast<float*>(out.data());
-            
+            const float* __restrict a_ptr = static_cast<const float*>(a.data());
+            const float* __restrict b_ptr = static_cast<const float*>(b.data());
+            float* __restrict out_ptr = static_cast<float*>(out.data());
+
             for (size_t m = 0; m < M; ++m) {
-                for (size_t n = 0; n < N; ++n) {
-                    float sum = 0.0f;
-                    for (size_t k = 0; k < K; ++k) {
-                        sum += a_ptr[a.shape().linear_index({m, k})] * 
+
+                for (size_t k = 0; k < K; ++k) {
+                    const float a_val = a_ptr[a.shape().linear_index({m, k})];
+                    for (size_t n = 0; n < N; ++n) {
+                        out_ptr[out.shape().linear_index({m, n})] += a_val * 
                                b_ptr[b.shape().linear_index({k, n})];
                     }
-                    out_ptr[out.shape().linear_index({m, n})] = sum;
                 }
             }
+
         } else throw std::runtime_error("Unsupported dtype for MatMul operation.");
     }
 
@@ -135,25 +138,24 @@ namespace kern::ops {
             throw std::invalid_argument("ReLU: Shapes must match.");
 
         if (in.dtype() == DataType::float32) {
-            const auto* in_ptr = static_cast<const float*>(in.data());
-            auto* out_ptr = static_cast<float*>(out.data());
+            const float* __restrict in_ptr = static_cast<const float*>(in.data());
+            float* __restrict out_ptr = static_cast<float*>(out.data());
             const size_t n = in.shape().element_count();
 
             for (size_t i = 0; i < n; ++i) {
                 out_ptr[i] = std::max(0.0f, in_ptr[i]);
             }
         } else throw std::runtime_error("Unsupported dtype for ReLU operation.");
-    }
+        }
 
-    void GELU(const Tensor& in, Tensor& out) {
+        void GELU(const Tensor& in, Tensor& out) {
         if (!(in.shape() == out.shape()))
             throw std::invalid_argument("GELU: Shapes must match.");
 
         if (in.dtype() == DataType::float32) {
-            const auto* in_ptr = static_cast<const float*>(in.data());
-            auto* out_ptr = static_cast<float*>(out.data());
+            const float* __restrict in_ptr = static_cast<const float*>(in.data());
+            float* __restrict out_ptr = static_cast<float*>(out.data());
             const size_t n = in.shape().element_count();
-
             const float k1 = 0.7978845608f; // sqrt(2/pi)
             const float k2 = 0.044715f;
 
@@ -174,12 +176,13 @@ namespace kern::ops {
         const size_t last_dim = in.shape().dimension(rank - 1);
         const size_t num_rows = in.shape().element_count() / last_dim;
 
-        const auto in_ptr = static_cast<const float*>(in.data());
-        auto* out_ptr = static_cast<float*>(out.data());
+        const float* __restrict in_ptr = static_cast<const float*>(in.data());
+        float* __restrict out_ptr = static_cast<float*>(out.data());
 
         for (size_t i = 0; i < num_rows; ++i) {
             const float* row_in = in_ptr + i * last_dim;
             float* row_out = out_ptr + i * last_dim;
+
 
             float max_val = -std::numeric_limits<float>::infinity();
             for (size_t j = 0; j < last_dim; ++j) max_val = std::max(max_val, row_in[j]);
