@@ -29,11 +29,25 @@ We implement a functional-style interface where the user defines the destination
 
 ---
 
+## Performance Benchmarking
+
+We rigorously benchmark core operators to track improvements. Below is the historical performance for a **MatMul (512x512, float32)** operation on Apple Silicon.
+
+| Implementation Stage | Description | Execution Time (ms) | Speedup |
+| :--- | :--- | :--- | :--- |
+| **Baseline (Scalar)** | Naive triple-nested loop | ~3500+ ms | 1.0x |
+| **Loop Reordered (M-K-N)** | Optimized for cache-line access | ~1880 ms | ~1.8x |
+| **SIMD (NEON + FMA)** | Vectorized inner loop (4 elements) | ~1070 ms | ~3.3x |
+
+*Note: Benchmarks are averaged over multiple iterations using `std::chrono` on an M-series Apple Silicon chip.*
+
+---
+
 ## Operators Implementation
 
 Our operator library is designed to be highly modular, with all kernels placed in the `kern::ops` namespace.
 
-*   **MatMul:** The engine's powerhouse. We utilize an optimized `m-k-n` loop ordering. By reordering the inner loop from the traditional `n` (column) to `n` (sequential access to B's rows), we ensure sequential memory access, drastically improving the CPU cache hit rate.
+*   **MatMul:** The engine's powerhouse. We utilize an optimized `m-k-n` loop ordering combined with SIMD acceleration.
 *   **Activation Functions:** Foundational units like `ReLU` and `GELU` (using a fast `tanh` approximation) are implemented as highly parallelizable element-wise kernels.
 *   **Reduction Operators:** `Softmax` and `LayerNorm` introduce the concept of "reduction" (aggregating multiple values). `Softmax` includes a "Max Trick" for numerical stability to prevent overflows in exponentiation.
 
@@ -43,12 +57,12 @@ Our operator library is designed to be highly modular, with all kernels placed i
 
 1.  **Restrict Pointers:** All raw data pointers are decorated with `__restrict`. This tells the compiler that the memory regions do not overlap, enabling more aggressive vectorization and SIMD instruction generation.
 2.  **64-Byte Alignment:** All memory buffers are aligned to 64-byte boundaries, matching the cache line size of Apple Silicon and the requirement for optimal NEON SIMD loading.
-3.  **Benchmarking Infrastructure:** We utilize `std::chrono` for micro-benchmarking core operators to track performance regressions and validate the impact of optimization techniques like SIMD and Tiling.
+3.  **Benchmarking Infrastructure:** We utilize `std::chrono` for micro-benchmarking core operators to track performance regressions and validate the impact of optimization techniques like SIMD.
 
 ---
 
 ## Roadmap for Future Development
 
-*   **SIMD Vectorization:** Explicit implementation of ARM NEON intrinsics (`vld1q_f32`, `vaddq_f32`, `vfmaq_f32`) for all kernels to achieve theoretical peak hardware utilization.
-*   **Advanced MatMul:** Implementation of Cache Tiling to further minimize RAM roundtrips for large matrices.
+*   **Multicore Parallelization:** Distribute operator workload across all CPU cores using a thread pool.
+*   **Advanced MatMul:** Introduction of Tiling techniques for large matrix performance.
 *   **Graph Execution Engine:** Moving from manually called operators to a `Session` object that compiles and executes an entire model graph with optimal scheduling.

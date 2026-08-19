@@ -135,7 +135,7 @@ void test_ops_relu() {
     kern::Tensor t_in(shape, kern::DataType::float32);
     kern::Tensor t_out(shape, kern::DataType::float32);
 
-    float* in_ptr = static_cast<float*>(t_in.data());
+    auto* in_ptr = static_cast<float*>(t_in.data());
     in_ptr[0] = -1.0f; in_ptr[1] = 0.0f; in_ptr[2] = 1.0f; in_ptr[3] = 2.0f;
 
     kern::ops::ReLU(t_in, t_out);

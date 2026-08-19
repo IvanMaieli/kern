@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <kern/config.hpp>
 
 namespace kern {
     class Buffer {
