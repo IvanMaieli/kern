@@ -38,6 +38,7 @@ We rigorously benchmark core operators to track improvements. Below is the histo
 | **Baseline (Scalar)** | Naive triple-nested loop | ~3500+ ms | 1.0x |
 | **Loop Reordered (M-K-N)** | Optimized for cache-line access | ~1880 ms | ~1.8x |
 | **SIMD (NEON + FMA)** | Vectorized inner loop (4 elements) | ~1070 ms | ~3.3x |
+| **Multicore (std::jthread)** | Parallelized over M rows | ~170 ms | ~20.5x |
 
 *Note: Benchmarks are averaged over multiple iterations using `std::chrono` on an M-series Apple Silicon chip.*
 

@@ -12,6 +12,7 @@ namespace kern::ops {
     void Transpose(const Tensor& in, std::size_t axis1, std::size_t axis2, Tensor& out);
     void Permute(const Tensor& in, const std::vector<std::size_t>& order, Tensor& out);
     void MatMul(const Tensor& a, const Tensor& b, Tensor& out);
+    void MatMulTransposed(const Tensor& a, const Tensor& b_t, Tensor& out);
     void ReLU(const Tensor& in, Tensor& out);
     void GELU(const Tensor& in, Tensor& out);
     void Softmax(const Tensor& in, Tensor& out);
