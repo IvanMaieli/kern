@@ -6,6 +6,8 @@
 #include "tests.hpp"
 #include <vector>
 #include <stdexcept>
+#include <limits>
+#include <cmath>
 
 void test_ops_add() {
     const kern::Shape shape{2, 2};
@@ -68,6 +70,43 @@ void test_ops_permute() {
     CHECK(t_out.buffer() == t_in.buffer());
 }
 
+void test_ops_permute_data() {
+    const kern::Shape shape_in{2, 3, 4};
+    kern::Tensor t_in(shape_in, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{4, 2, 3}, kern::DataType::float32);
+
+    auto* in_ptr = static_cast<float*>(t_in.data());
+    for (std::size_t i = 0; i < 24; ++i) in_ptr[i] = static_cast<float>(i);
+
+    kern::ops::Permute(t_in, {2, 0, 1}, t_out);
+
+    // {2,3,4} has strides {12,4,1}; order {2,0,1} must produce strides
+    // {1,12,4}, so the view maps (c0,c1,c2) to source index c0 + 12*c1 + 4*c2.
+    // (Recomputing contiguous strides {6,3,1} reads the wrong elements.)
+    const auto* out_ptr = static_cast<const float*>(t_out.data());
+    for (std::size_t c0 = 0; c0 < 4; ++c0)
+        for (std::size_t c1 = 0; c1 < 2; ++c1)
+            for (std::size_t c2 = 0; c2 < 3; ++c2)
+                CHECK(out_ptr[t_out.shape().linear_index({c0, c1, c2})] ==
+                      in_ptr[c0 + 12 * c1 + 4 * c2]);
+}
+
+void test_ops_transpose_data() {
+    kern::Tensor t_in(kern::Shape{2, 3}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{3, 2}, kern::DataType::float32);
+
+    auto* in_ptr = static_cast<float*>(t_in.data());
+    for (std::size_t i = 0; i < 6; ++i) in_ptr[i] = static_cast<float>(i);
+
+    kern::ops::Transpose(t_in, 0, 1, t_out);
+
+    // out[i][j] must read in[j][i]: linear index i + 3*j, not 2*i + j.
+    const auto* out_ptr = static_cast<const float*>(t_out.data());
+    for (std::size_t i = 0; i < 3; ++i)
+        for (std::size_t j = 0; j < 2; ++j)
+            CHECK(out_ptr[t_out.shape().linear_index({i, j})] == in_ptr[j * 3 + i]);
+}
+
 void test_ops_broadcast_add() {
     const kern::Shape shape_a{2, 3};
     const kern::Shape shape_b{1, 3};
@@ -93,6 +132,80 @@ void test_ops_broadcast_add() {
     CHECK(out_ptr[3] == 14.0f);
     CHECK(out_ptr[4] == 25.0f);
     CHECK(out_ptr[5] == 36.0f);
+}
+
+void test_ops_broadcast_add_rank_mismatch() {
+    // [2,3] + [3]: the rank-1 operand right-aligns against the last axis.
+    kern::Tensor t_a(kern::Shape{2, 3}, kern::DataType::float32);
+    kern::Tensor t_b(kern::Shape{3}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{2, 3}, kern::DataType::float32);
+
+    auto* a_ptr = static_cast<float*>(t_a.data());
+    auto* b_ptr = static_cast<float*>(t_b.data());
+    a_ptr[0] = 1.0f; a_ptr[1] = 2.0f; a_ptr[2] = 3.0f;
+    a_ptr[3] = 4.0f; a_ptr[4] = 5.0f; a_ptr[5] = 6.0f;
+    b_ptr[0] = 10.0f; b_ptr[1] = 20.0f; b_ptr[2] = 30.0f;
+
+    kern::ops::Add(t_a, t_b, t_out);
+
+    const auto* out_ptr = static_cast<const float*>(t_out.data());
+    CHECK(out_ptr[0] == 11.0f);
+    CHECK(out_ptr[1] == 22.0f);
+    CHECK(out_ptr[2] == 33.0f);
+    CHECK(out_ptr[3] == 14.0f);
+    CHECK(out_ptr[4] == 25.0f);
+    CHECK(out_ptr[5] == 36.0f);
+}
+
+void test_ops_broadcast_add_scalar() {
+    // A rank-0 operand broadcasts to every element through a zero stride.
+    kern::Tensor t_a(kern::Shape{2, 2}, kern::DataType::float32);
+    kern::Tensor t_b(kern::Shape{}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{2, 2}, kern::DataType::float32);
+
+    auto* a_ptr = static_cast<float*>(t_a.data());
+    static_cast<float*>(t_b.data())[0] = 10.0f;
+    a_ptr[0] = 1.0f; a_ptr[1] = 2.0f; a_ptr[2] = 3.0f; a_ptr[3] = 4.0f;
+
+    kern::ops::Add(t_a, t_b, t_out);
+
+    const auto* out_ptr = static_cast<const float*>(t_out.data());
+    CHECK(out_ptr[0] == 11.0f);
+    CHECK(out_ptr[1] == 12.0f);
+    CHECK(out_ptr[2] == 13.0f);
+    CHECK(out_ptr[3] == 14.0f);
+}
+
+void test_ops_add_inplace() {
+    // out shares a's buffer: same shape, contiguous, element-wise safe.
+    kern::Tensor t_a(kern::Shape{2, 2}, kern::DataType::float32);
+    kern::Tensor t_b(kern::Shape{2, 2}, kern::DataType::float32);
+    kern::Tensor t_out = t_a;
+
+    auto* a_ptr = static_cast<float*>(t_a.data());
+    auto* b_ptr = static_cast<float*>(t_b.data());
+    a_ptr[0] = 1.0f; a_ptr[1] = 2.0f; a_ptr[2] = 3.0f; a_ptr[3] = 4.0f;
+    b_ptr[0] = 10.0f; b_ptr[1] = 20.0f; b_ptr[2] = 30.0f; b_ptr[3] = 40.0f;
+
+    kern::ops::Add(t_a, t_b, t_out);
+
+    const auto* out_ptr = static_cast<const float*>(t_out.data());
+    CHECK(out_ptr[0] == 11.0f);
+    CHECK(out_ptr[1] == 22.0f);
+    CHECK(out_ptr[2] == 33.0f);
+    CHECK(out_ptr[3] == 44.0f);
+}
+
+void test_ops_add_inplace_broadcast_rejected() {
+    // out aliases a broadcast operand: writing output rows would clobber a
+    // before it is read, so Add must refuse.
+    kern::Tensor t_a(kern::Shape{1, 3}, kern::DataType::float32);
+    kern::Tensor t_b(kern::Shape{2, 3}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{2, 3}, kern::DataType::float32, t_a.buffer());
+
+    bool caught = false;
+    try { kern::ops::Add(t_a, t_b, t_out); } catch (const std::invalid_argument&) { caught = true; }
+    CHECK(caught);
 }
 
 void test_ops_matmul() {
@@ -130,6 +243,76 @@ void test_ops_matmul() {
     CHECK(out_ptr[3] == 154.0f);
 }
 
+void test_ops_matmul_output_reuse() {
+    kern::Tensor t_a(kern::Shape{2, 3}, kern::DataType::float32);
+    kern::Tensor t_b(kern::Shape{3, 2}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{2, 2}, kern::DataType::float32);
+
+    auto* a_ptr = static_cast<float*>(t_a.data());
+    auto* b_ptr = static_cast<float*>(t_b.data());
+    a_ptr[0] = 1.0f; a_ptr[1] = 2.0f; a_ptr[2] = 3.0f;
+    a_ptr[3] = 4.0f; a_ptr[4] = 5.0f; a_ptr[5] = 6.0f;
+    b_ptr[0] = 7.0f;  b_ptr[1] = 8.0f;
+    b_ptr[2] = 9.0f;  b_ptr[3] = 10.0f;
+    b_ptr[4] = 11.0f; b_ptr[5] = 12.0f;
+
+    auto* out_ptr = static_cast<float*>(t_out.data());
+    // Poison the output: a kernel that accumulates into out without zeroing
+    // first folds the NaNs (or any stale result) into the product.
+    for (std::size_t i = 0; i < 4; ++i) out_ptr[i] = std::numeric_limits<float>::quiet_NaN();
+
+    kern::ops::MatMul(t_a, t_b, t_out);
+    CHECK(out_ptr[0] == 58.0f);
+    CHECK(out_ptr[1] == 64.0f);
+    CHECK(out_ptr[2] == 139.0f);
+    CHECK(out_ptr[3] == 154.0f);
+
+    // A second run into the same buffer must not accumulate on top of the first.
+    kern::ops::MatMul(t_a, t_b, t_out);
+    CHECK(out_ptr[0] == 58.0f);
+    CHECK(out_ptr[1] == 64.0f);
+    CHECK(out_ptr[2] == 139.0f);
+    CHECK(out_ptr[3] == 154.0f);
+}
+
+void test_ops_matmul_non_contiguous_rejected() {
+    const kern::Tensor t_a(kern::Shape{3, 2}, kern::DataType::float32);
+    kern::Tensor t_view(kern::Shape{2, 3}, kern::DataType::float32);
+    kern::ops::Permute(t_a, {1, 0}, t_view); // zero-copy view, strides {1,3}
+
+    const kern::Tensor t_b(kern::Shape{3, 2}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{2, 2}, kern::DataType::float32);
+
+    // Raw-pointer kernels must refuse non-contiguous views instead of
+    // silently reading the wrong elements.
+    bool caught = false;
+    try { kern::ops::MatMul(t_view, t_b, t_out); } catch (const std::invalid_argument&) { caught = true; }
+    CHECK(caught);
+}
+
+void test_ops_matmul_transposed() {
+    // Same product as test_ops_matmul, with B supplied pre-transposed [N, K].
+    kern::Tensor t_a(kern::Shape{2, 3}, kern::DataType::float32);
+    kern::Tensor t_b_t(kern::Shape{2, 3}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{2, 2}, kern::DataType::float32);
+
+    auto* a_ptr = static_cast<float*>(t_a.data());
+    auto* bt_ptr = static_cast<float*>(t_b_t.data());
+    a_ptr[0] = 1.0f; a_ptr[1] = 2.0f; a_ptr[2] = 3.0f;
+    a_ptr[3] = 4.0f; a_ptr[4] = 5.0f; a_ptr[5] = 6.0f;
+    // Columns of B, stored row-wise.
+    bt_ptr[0] = 7.0f;  bt_ptr[1] = 9.0f;  bt_ptr[2] = 11.0f;
+    bt_ptr[3] = 8.0f;  bt_ptr[4] = 10.0f; bt_ptr[5] = 12.0f;
+
+    kern::ops::MatMulTransposed(t_a, t_b_t, t_out);
+
+    const auto* out_ptr = static_cast<const float*>(t_out.data());
+    CHECK(out_ptr[0] == 58.0f);
+    CHECK(out_ptr[1] == 64.0f);
+    CHECK(out_ptr[2] == 139.0f);
+    CHECK(out_ptr[3] == 154.0f);
+}
+
 void test_ops_relu() {
     const kern::Shape shape{2, 2};
     kern::Tensor t_in(shape, kern::DataType::float32);
@@ -147,6 +330,22 @@ void test_ops_relu() {
     CHECK(out_ptr[3] == 2.0f);
 }
 
+void test_ops_relu_vectorized() {
+    // 10 elements: exercises both the NEON body (8) and the scalar tail (2).
+    kern::Tensor t_in(kern::Shape{10}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{10}, kern::DataType::float32);
+
+    auto* in_ptr = static_cast<float*>(t_in.data());
+    const float values[10] = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, -4.0f, 4.0f, -5.0f, 5.0f};
+    for (std::size_t i = 0; i < 10; ++i) in_ptr[i] = values[i];
+
+    kern::ops::ReLU(t_in, t_out);
+
+    const auto* out_ptr2 = static_cast<const float*>(t_out.data());
+    const float expected[10] = {0.0f, 0.0f, 0.0f, 1.0f, 2.0f, 3.0f, 0.0f, 4.0f, 0.0f, 5.0f};
+    for (std::size_t i = 0; i < 10; ++i) CHECK(out_ptr2[i] == expected[i]);
+}
+
 void test_ops_gelu() {
     const kern::Shape shape{1};
     kern::Tensor t_in(shape, kern::DataType::float32);
@@ -160,6 +359,28 @@ void test_ops_gelu() {
     const auto* out_ptr = static_cast<float*>(t_out.data());
     // GELU(0) should be 0
     CHECK(std::abs(out_ptr[0]) < 1e-5f);
+}
+
+void test_ops_gelu_accuracy() {
+    // 33 elements: NEON body + scalar tail, values across the tanh knee.
+    const std::size_t n = 33;
+    kern::Tensor t_in(kern::Shape{n}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{n}, kern::DataType::float32);
+
+    auto* in_ptr = static_cast<float*>(t_in.data());
+    for (std::size_t i = 0; i < n; ++i)
+        in_ptr[i] = -4.0f + 0.25f * static_cast<float>(i);
+
+    kern::ops::GELU(t_in, t_out);
+
+    const auto* out_ptr = static_cast<const float*>(t_out.data());
+    const float k1 = 0.7978845608f;
+    const float k2 = 0.044715f;
+    for (std::size_t i = 0; i < n; ++i) {
+        const float x = in_ptr[i];
+        const float expected = 0.5f * x * (1.0f + std::tanh(k1 * (x + k2 * x * x * x)));
+        CHECK(std::abs(out_ptr[i] - expected) < 1e-5f);
+    }
 }
 
 void test_ops_softmax() {

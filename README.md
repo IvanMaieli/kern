@@ -21,11 +21,12 @@ $$ Index = \sum_{i=0}^{N} (c_i \times stride_i) $$
 This allows the engine to represent non-contiguous views (e.g., a transposed matrix) as a standard tensor, delegating the complexity to the index calculation rather than moving physical bytes.
 
 ### 2. Broadcasting via Stride-Zero
-To support flexible arithmetic, we implemented a robust broadcasting mechanism. When a dimension needs to be "broadcasted" (e.g., adding a vector `[1, 1024]` to a matrix `[32, 1024]`), we set the `stride` of the broadcasted dimension to **0**.
-During the index calculation, the coordinate for that axis is multiplied by 0, effectively "freezing" the pointer at the same memory location for that dimension. This allows the engine to broadcast shapes without any data duplication or extra memory allocation.
+To support flexible arithmetic, we implement broadcasting through precomputed *effective strides*: each operand is right-aligned against the output rank, and any axis it broadcasts on gets a stride of **0**. A zero stride "freezes" the pointer at the same memory location for that axis, so shapes broadcast without any data duplication or extra memory allocation — including rank-0 scalars, which broadcast to every element.
+The output is walked with an odometer over the leading axes (no per-element div/mod), and the last axis is vectorized with NEON whenever both operands have unit stride there. In-place operation (`out` aliasing an input) is permitted when the aliased operand matches `out` exactly (same shape, contiguous) and rejected otherwise.
 
-### 3. Memory Safety and Aliasing
-We implement a functional-style interface where the user defines the destination tensor. To maximize efficiency, we added an `is_aliased` check. This allows our element-wise kernels (Add, ReLU, GELU) to safely detect when input and output buffers overlap (in-place operations), preventing expensive allocations in memory-constrained scenarios while maintaining mathematical safety for structural operators (MatMul, Permute).
+### 3. Memory Safety, Aliasing and Views
+We implement a functional-style interface where the user defines the destination tensor. An `is_aliased` check lets element-wise kernels (Add, ReLU, GELU) detect overlapping input/output buffers and run safely in place — same-shape in-place `Add` takes the vectorized path directly. Kernels that cannot tolerate overlap (MatMul, MatMulTransposed) reject an aliased `out` outright.
+Zero-copy view operations (`Transpose`, `Permute`) permute the `Shape`'s strides together with its dimensions, so the metadata always describes the real buffer layout. Raw-pointer kernels verify `Shape::is_contiguous()` and reject views they cannot read correctly instead of silently misindexing.
 
 ---
 
@@ -39,8 +40,18 @@ We rigorously benchmark core operators to track improvements. Below is the histo
 | **Loop Reordered (M-K-N)** | Optimized for cache-line access | ~1880 ms | ~1.8x |
 | **SIMD (NEON + FMA)** | Vectorized inner loop (4 elements) | ~1070 ms | ~3.3x |
 | **Multicore (std::jthread)** | Parallelized over M rows | ~170 ms | ~20.5x |
+| **Tiled + ThreadPool** | M-N-K 64x64 tiles, persistent pool, 2x-unrolled FMA | ~8 ms | ~440x |
 
-*Note: Benchmarks are averaged over multiple iterations using `std::chrono` on an M-series Apple Silicon chip.*
+Current operator benchmarks (Release build, M-series):
+
+| Operator | Shape | Execution Time |
+| :--- | :--- | :--- |
+| MatMul | 512x512 | ~8 ms |
+| MatMulTransposed | 512x512 (B supplied as B^T) | ~4 ms |
+| Broadcast Add | 512x512 + 512 | ~0.04 ms |
+| GELU | 512x2048 | ~0.17 ms/iter |
+
+*Note: Benchmarks are averaged over multiple iterations using `std::chrono` on an M-series Apple Silicon chip (`kern-tests` bench suite, Release build).*
 
 ---
 
@@ -48,8 +59,8 @@ We rigorously benchmark core operators to track improvements. Below is the histo
 
 Our operator library is designed to be highly modular, with all kernels placed in the `kern::ops` namespace.
 
-*   **MatMul:** The engine's powerhouse. We utilize an optimized `m-k-n` loop ordering combined with SIMD acceleration.
-*   **Activation Functions:** Foundational units like `ReLU` and `GELU` (using a fast `tanh` approximation) are implemented as highly parallelizable element-wise kernels.
+*   **MatMul / MatMulTransposed:** The engine's powerhouse. `MatMul` uses an optimized tiled `m-n-k` loop ordering with SIMD acceleration across a persistent thread pool, and zeroes its output tiles so destination buffers can be safely reused. `MatMulTransposed` takes `B` pre-transposed (`[N, K]`): both operands are then contiguous along the reduction axis, making it ~2x faster than `MatMul` on the same shapes — the preferred layout for stored weights.
+*   **Activation Functions:** `ReLU` (NEON `vmax`) and `GELU` (a vectorized `tanh` approximation built from a Pade approximant and the double-angle identity, accurate to ~1e-7) run as parallel element-wise kernels.
 *   **Reduction Operators:** `Softmax` and `LayerNorm` introduce the concept of "reduction" (aggregating multiple values). `Softmax` includes a "Max Trick" for numerical stability to prevent overflows in exponentiation.
 
 ---
@@ -64,6 +75,7 @@ Our operator library is designed to be highly modular, with all kernels placed i
 
 ## Roadmap for Future Development
 
-*   **Multicore Parallelization:** Distribute operator workload across all CPU cores using a thread pool.
-*   **Advanced MatMul:** Introduction of Tiling techniques for large matrix performance.
+*   ~~Multicore Parallelization~~ and ~~Tiled MatMul~~: shipped — a persistent `ThreadPool` drives all compute-heavy kernels, and MatMul tiles the `M-N-K` loops in 64x64 blocks.
+*   **Decode-Path GEMV:** With `M = 1` (LLM decoding), parallelizing only over M leaves the pool idle; partition the workload over N/K as well.
+*   **float16 / int8 Kernels:** The dtype system exists; the kernels do not yet.
 *   **Graph Execution Engine:** Moving from manually called operators to a `Session` object that compiles and executes an entire model graph with optimal scheduling.

@@ -11,6 +11,17 @@ void test_shape() {
     CHECK(matrix.dimension(0) == 2);
     CHECK(matrix.dimension(1) == 3);
     CHECK(matrix.element_count() == 6);
+    CHECK(matrix.is_contiguous());
+
+    // Views: swapping axes must permute the existing strides, not recompute
+    // contiguous ones, or the shape no longer describes the buffer layout.
+    kern::Shape view{2, 3};
+    view.swap_dimensions(0, 1);
+    CHECK(view.dimension(0) == 3);
+    CHECK(view.dimension(1) == 2);
+    CHECK(view.stride(0) == 1); // was stride(1) of {2,3}
+    CHECK(view.stride(1) == 3); // was stride(0) of {2,3}
+    CHECK(!view.is_contiguous());
 
     constexpr kern::Shape scalar;
 

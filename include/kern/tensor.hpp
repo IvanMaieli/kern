@@ -42,7 +42,7 @@ namespace kern {
 
     private:
         Shape shape_;
-        DataType dtype_;
+        DataType dtype_{DataType::float32};
         std::shared_ptr<Buffer> buffer_;
     };
 }

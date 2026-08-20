@@ -28,8 +28,10 @@ namespace kern {
         // Strides methods
         [[nodiscard]] Dimension stride(std::size_t axis) const;
         [[nodiscard]] std::size_t linear_index(const std::array<Dimension, maximum_rank>& coords) const;
-        
-        // Internal method for Transpose to update metadata directly
+        [[nodiscard]] bool is_contiguous() const noexcept;
+
+        // Metadata-only view operations: dimensions and strides are updated
+        // together so the shape keeps describing the same buffer layout.
         void swap_dimensions(std::size_t axis1, std::size_t axis2);
         void apply_permutation(const std::vector<std::size_t>& order);
 

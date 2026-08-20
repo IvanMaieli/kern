@@ -5,8 +5,10 @@
 #pragma once
 
 #include <kern/tensor.hpp>
+#include <kern/thread_pool.hpp>
 
 namespace kern::ops {
+    ThreadPool& GetThreadPool();
     void Add(const Tensor& a, const Tensor& b, Tensor& out);
     void Reshape(const Tensor& in, const Shape& new_shape, Tensor& out);
     void Transpose(const Tensor& in, std::size_t axis1, std::size_t axis2, Tensor& out);

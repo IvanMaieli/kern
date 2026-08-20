@@ -79,21 +79,43 @@ namespace kern {
             throw std::out_of_range{"Shape axis is out of range"};
 
         std::swap(dimensions_[axis1], dimensions_[axis2]);
-        compute_strides();
+        // Swap strides instead of recomputing them: the buffer is unchanged,
+        // so the view must keep mapping coordinates to the same elements.
+        std::swap(strides_[axis1], strides_[axis2]);
     }
 
     void Shape::apply_permutation(const std::vector<std::size_t>& order) {
         if (order.size() != rank_)
             throw std::invalid_argument{"Permutation order must match rank."};
 
-        std::array<Dimension, maximum_rank> new_dims;
+        std::array<Dimension, maximum_rank> new_dims{};
+        std::array<Dimension, maximum_rank> new_strides{};
+        std::array<bool, maximum_rank> seen{};
         for (std::size_t i = 0; i < rank_; ++i) {
-            if (order[i] >= rank_)
+            const std::size_t source = order[i];
+            if (source >= rank_)
                 throw std::out_of_range{"Invalid axis in permutation order."};
-            new_dims[i] = dimensions_[order[i]];
+            if (seen[source])
+                throw std::invalid_argument{"Permutation order must not repeat an axis."};
+            seen[source] = true;
+            new_dims[i] = dimensions_[source];
+            new_strides[i] = strides_[source];
         }
         dimensions_ = new_dims;
-        compute_strides();
+        strides_ = new_strides;
+    }
+
+    bool Shape::is_contiguous() const noexcept {
+        // Row-major layout: matches what compute_strides() would produce.
+        // Size-1 axes are exempt because their coordinate is always 0.
+        std::size_t expected = 1;
+        for (std::size_t i = rank_; i > 0; --i) {
+            const std::size_t axis = i - 1;
+            if (dimensions_[axis] != 1 && strides_[axis] != expected)
+                return false;
+            expected *= dimensions_[axis];
+        }
+        return true;
     }
 
 } // namespace kern

@@ -28,6 +28,7 @@ add_library(kern
         include/kern/ops.hpp
         src/ops.cpp
         include/kern/config.hpp
+        src/thread_pool.cpp
 )
 
 add_library(kern::kern ALIAS kern)

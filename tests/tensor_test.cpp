@@ -5,6 +5,15 @@
 #include "test_macros.hpp"
 #include "tests.hpp"
 
+void test_tensor_default() {
+    kern::Tensor t;
+
+    CHECK(t.shape().empty());
+    CHECK(t.dtype() == kern::DataType::float32); // dtype_ must not read garbage
+    CHECK(t.data() == nullptr);
+    CHECK(t.size_bytes() == 0);
+}
+
 void test_tensor_basics() {
     const kern::Shape shape{2, 3};
     kern::Tensor t(shape, kern::DataType::float32);
