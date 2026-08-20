@@ -9,6 +9,7 @@
 #include <arm_neon.h>
 #include <thread>
 #include <latch>
+#include <type_traits>
 
 namespace kern::ops {
 
@@ -94,15 +95,62 @@ namespace kern::ops {
         static void store1(T* p, float v) { *p = static_cast<__fp16>(v); }
     };
 
-    template <typename Tr>
-    static float dot_range(const typename Tr::T* x, const typename Tr::T* y, size_t n) {
-        float32x4_t acc = vdupq_n_f32(0.0f);
+#if defined(__ARM_FEATURE_FP16_FML)
+    // FMLAL micro-kernel: fp16 multiply, fp32 accumulate. No conversion
+    // instructions in the loop and 8 elements per vector pair, so the f16
+    // bandwidth advantage is not eaten by cvvt throughput.
+    static float dot_f16_fmlal(const __fp16* x, const __fp16* y, size_t n) {
+        float32x4_t acc0 = vdupq_n_f32(0.0f), acc1 = vdupq_n_f32(0.0f);
+        float32x4_t acc2 = vdupq_n_f32(0.0f), acc3 = vdupq_n_f32(0.0f);
         size_t k = 0;
-        for (; k + 3 < n; k += 4)
-            acc = vfmaq_f32(acc, Tr::load4(x + k), Tr::load4(y + k));
+        for (; k + 15 < n; k += 16) {
+            const float16x8_t vx0 = vld1q_f16(x + k), vy0 = vld1q_f16(y + k);
+            const float16x8_t vx1 = vld1q_f16(x + k + 8), vy1 = vld1q_f16(y + k + 8);
+            acc0 = vfmlalq_low_f16(acc0, vx0, vy0);
+            acc1 = vfmlalq_high_f16(acc1, vx0, vy0);
+            acc2 = vfmlalq_low_f16(acc2, vx1, vy1);
+            acc3 = vfmlalq_high_f16(acc3, vx1, vy1);
+        }
+        for (; k + 7 < n; k += 8) {
+            const float16x8_t vx = vld1q_f16(x + k), vy = vld1q_f16(y + k);
+            acc0 = vfmlalq_low_f16(acc0, vx, vy);
+            acc1 = vfmlalq_high_f16(acc1, vx, vy);
+        }
+        const float32x4_t acc = vaddq_f32(vaddq_f32(acc0, acc1), vaddq_f32(acc2, acc3));
+        float sum = vaddvq_f32(acc);
+        for (; k < n; ++k) sum += static_cast<float>(x[k]) * static_cast<float>(y[k]);
+        return sum;
+    }
+#endif
+
+    // Four independent FMA chains: with a single accumulator, FMA latency
+    // (~4 cycles) caps throughput at one vector per latency window; four
+    // chains keep both FMA pipes busy.
+    template <typename Tr>
+    static float dot_traits(const typename Tr::T* x, const typename Tr::T* y, size_t n) {
+        float32x4_t acc0 = vdupq_n_f32(0.0f), acc1 = vdupq_n_f32(0.0f);
+        float32x4_t acc2 = vdupq_n_f32(0.0f), acc3 = vdupq_n_f32(0.0f);
+        size_t k = 0;
+        for (; k + 15 < n; k += 16) {
+            acc0 = vfmaq_f32(acc0, Tr::load4(x + k), Tr::load4(y + k));
+            acc1 = vfmaq_f32(acc1, Tr::load4(x + k + 4), Tr::load4(y + k + 4));
+            acc2 = vfmaq_f32(acc2, Tr::load4(x + k + 8), Tr::load4(y + k + 8));
+            acc3 = vfmaq_f32(acc3, Tr::load4(x + k + 12), Tr::load4(y + k + 12));
+        }
+        const float32x4_t acc = vaddq_f32(vaddq_f32(acc0, acc1), vaddq_f32(acc2, acc3));
         float sum = vaddvq_f32(acc);
         for (; k < n; ++k) sum += Tr::load1(x + k) * Tr::load1(y + k);
         return sum;
+    }
+
+    template <typename Tr>
+    static float dot_range(const typename Tr::T* x, const typename Tr::T* y, size_t n) {
+#if defined(__ARM_FEATURE_FP16_FML)
+        if constexpr (std::is_same_v<Tr, F16Traits>)
+            return dot_f16_fmlal(x, y, n);
+        else
+#endif
+        return dot_traits<Tr>(x, y, n);
     }
 
     // Element-wise a+b over a flat range. In-order processing reads each
@@ -252,8 +300,27 @@ namespace kern::ops {
         }
     }
 
-    // Tiled M-N-K matmul over a row range; the template only changes how
-    // elements are loaded/stored, all arithmetic stays in f32 registers.
+    // One scalar output cell over all k-tiles: shared fallback for row/column
+    // remainders that do not fill a register block. Same first-tile-defines
+    // semantics as the register kernels.
+    template <typename Tr>
+    static void matmul_scalar_cell(const typename Tr::T* a_row, const typename Tr::T* b_ptr,
+                                   typename Tr::T* out_cell, size_t K, size_t N, size_t n) {
+        for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+            const size_t k_max = std::min(k_tile + TILE_SIZE, K);
+            float acc = (k_tile != 0) ? Tr::load1(out_cell) : 0.0f;
+            for (size_t k = k_tile; k < k_max; ++k)
+                acc += Tr::load1(a_row + k) * Tr::load1(b_ptr + k * N + n);
+            Tr::store1(out_cell, acc);
+        }
+    }
+
+    // Tiled M-N-K matmul over a row range. The micro-kernel is a 4x16
+    // register block (16 accumulators): each 4-vector B load feeds FMAs for
+    // 4 rows at once, so the inner loop is FMA-bound rather than load-bound —
+    // a 1-row block wastes ~2x throughput paying one B load per 4 FMAs.
+    // Inside the 64x64 tile the n-block-major order touches out once per
+    // k-tile (not once per k), and the B tile stays L1-resident.
     template <typename Tr>
     static void matmul_rows(const typename Tr::T* a_ptr, const typename Tr::T* b_ptr,
                             typename Tr::T* out_ptr,
@@ -263,44 +330,254 @@ namespace kern::ops {
                 const size_t m_max = std::min(m_tile + TILE_SIZE, m_end);
                 const size_t n_max = std::min(n_tile + TILE_SIZE, N);
 
-                // Zero the output tile so the accumulation below produces
-                // correct results even when the output buffer holds stale
-                // data. +0.0 is an all-zero byte pattern for both f32 and
-                // f16, so memset is valid for both.
-                for (size_t m = m_tile; m < m_max; ++m)
-                    std::memset(out_ptr + m * N + n_tile, 0,
-                                (n_max - n_tile) * sizeof(typename Tr::T));
+                size_t m = m_tile;
+                for (; m + 3 < m_max; m += 4) {
+                    const typename Tr::T* a0 = a_ptr + m * K;
+                    const typename Tr::T* a1 = a0 + K;
+                    const typename Tr::T* a2 = a1 + K;
+                    const typename Tr::T* a3 = a2 + K;
+                    typename Tr::T* o0 = out_ptr + m * N;
+                    typename Tr::T* o1 = o0 + N;
+                    typename Tr::T* o2 = o1 + N;
+                    typename Tr::T* o3 = o2 + N;
 
-                for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
-                    const size_t k_max = std::min(k_tile + TILE_SIZE, K);
-
-                    for (size_t m = m_tile; m < m_max; ++m) {
-                        const typename Tr::T* a_row = a_ptr + m * K;
-                        typename Tr::T* out_row = out_ptr + m * N;
-                        for (size_t k = k_tile; k < k_max; ++k) {
-                            const float a_val = Tr::load1(a_row + k);
-                            const float32x4_t va_val = vdupq_n_f32(a_val);
-                            const typename Tr::T* b_row = b_ptr + k * N;
-
-                            size_t n = n_tile;
-                            for (; n + 7 < n_max; n += 8) {
-                                float32x4_t vout1 = Tr::load4(out_row + n);
-                                vout1 = vfmaq_f32(vout1, va_val, Tr::load4(b_row + n));
-                                Tr::store4(out_row + n, vout1);
-
-                                float32x4_t vout2 = Tr::load4(out_row + n + 4);
-                                vout2 = vfmaq_f32(vout2, va_val, Tr::load4(b_row + n + 4));
-                                Tr::store4(out_row + n + 4, vout2);
+                    size_t n = n_tile;
+                    for (; n + 15 < n_max; n += 16) {
+                        for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+                            const size_t k_max = std::min(k_tile + TILE_SIZE, K);
+                            // First k-tile defines the tile (accumulators start
+                            // at zero), later tiles accumulate on top: the
+                            // caller's stale buffer never leaks in.
+                            float32x4_t c00 = vdupq_n_f32(0.0f), c01 = vdupq_n_f32(0.0f);
+                            float32x4_t c02 = vdupq_n_f32(0.0f), c03 = vdupq_n_f32(0.0f);
+                            float32x4_t c10 = vdupq_n_f32(0.0f), c11 = vdupq_n_f32(0.0f);
+                            float32x4_t c12 = vdupq_n_f32(0.0f), c13 = vdupq_n_f32(0.0f);
+                            float32x4_t c20 = vdupq_n_f32(0.0f), c21 = vdupq_n_f32(0.0f);
+                            float32x4_t c22 = vdupq_n_f32(0.0f), c23 = vdupq_n_f32(0.0f);
+                            float32x4_t c30 = vdupq_n_f32(0.0f), c31 = vdupq_n_f32(0.0f);
+                            float32x4_t c32 = vdupq_n_f32(0.0f), c33 = vdupq_n_f32(0.0f);
+                            if (k_tile != 0) {
+                                c00 = Tr::load4(o0 + n);     c01 = Tr::load4(o0 + n + 4);
+                                c02 = Tr::load4(o0 + n + 8); c03 = Tr::load4(o0 + n + 12);
+                                c10 = Tr::load4(o1 + n);     c11 = Tr::load4(o1 + n + 4);
+                                c12 = Tr::load4(o1 + n + 8); c13 = Tr::load4(o1 + n + 12);
+                                c20 = Tr::load4(o2 + n);     c21 = Tr::load4(o2 + n + 4);
+                                c22 = Tr::load4(o2 + n + 8); c23 = Tr::load4(o2 + n + 12);
+                                c30 = Tr::load4(o3 + n);     c31 = Tr::load4(o3 + n + 4);
+                                c32 = Tr::load4(o3 + n + 8); c33 = Tr::load4(o3 + n + 12);
                             }
-                            for (; n < n_max; ++n)
-                                Tr::store1(out_row + n,
-                                           Tr::load1(out_row + n) + a_val * Tr::load1(b_row + n));
+                            for (size_t k = k_tile; k < k_max; ++k) {
+                                const typename Tr::T* b_row = b_ptr + k * N + n;
+                                const float32x4_t b0 = Tr::load4(b_row);
+                                const float32x4_t b1 = Tr::load4(b_row + 4);
+                                const float32x4_t b2 = Tr::load4(b_row + 8);
+                                const float32x4_t b3 = Tr::load4(b_row + 12);
+                                float32x4_t va = vdupq_n_f32(Tr::load1(a0 + k));
+                                c00 = vfmaq_f32(c00, va, b0); c01 = vfmaq_f32(c01, va, b1);
+                                c02 = vfmaq_f32(c02, va, b2); c03 = vfmaq_f32(c03, va, b3);
+                                va = vdupq_n_f32(Tr::load1(a1 + k));
+                                c10 = vfmaq_f32(c10, va, b0); c11 = vfmaq_f32(c11, va, b1);
+                                c12 = vfmaq_f32(c12, va, b2); c13 = vfmaq_f32(c13, va, b3);
+                                va = vdupq_n_f32(Tr::load1(a2 + k));
+                                c20 = vfmaq_f32(c20, va, b0); c21 = vfmaq_f32(c21, va, b1);
+                                c22 = vfmaq_f32(c22, va, b2); c23 = vfmaq_f32(c23, va, b3);
+                                va = vdupq_n_f32(Tr::load1(a3 + k));
+                                c30 = vfmaq_f32(c30, va, b0); c31 = vfmaq_f32(c31, va, b1);
+                                c32 = vfmaq_f32(c32, va, b2); c33 = vfmaq_f32(c33, va, b3);
+                            }
+                            Tr::store4(o0 + n, c00);     Tr::store4(o0 + n + 4, c01);
+                            Tr::store4(o0 + n + 8, c02); Tr::store4(o0 + n + 12, c03);
+                            Tr::store4(o1 + n, c10);     Tr::store4(o1 + n + 4, c11);
+                            Tr::store4(o1 + n + 8, c12); Tr::store4(o1 + n + 12, c13);
+                            Tr::store4(o2 + n, c20);     Tr::store4(o2 + n + 4, c21);
+                            Tr::store4(o2 + n + 8, c22); Tr::store4(o2 + n + 12, c23);
+                            Tr::store4(o3 + n, c30);     Tr::store4(o3 + n + 4, c31);
+                            Tr::store4(o3 + n + 8, c32); Tr::store4(o3 + n + 12, c33);
                         }
                     }
+                    for (; n < n_max; ++n) {
+                        matmul_scalar_cell<Tr>(a0, b_ptr, o0 + n, K, N, n);
+                        matmul_scalar_cell<Tr>(a1, b_ptr, o1 + n, K, N, n);
+                        matmul_scalar_cell<Tr>(a2, b_ptr, o2 + n, K, N, n);
+                        matmul_scalar_cell<Tr>(a3, b_ptr, o3 + n, K, N, n);
+                    }
+                }
+                // Row remainder (< 4 rows) and narrow columns: 1-row 16-wide
+                // block plus scalar cells.
+                for (; m < m_max; ++m) {
+                    const typename Tr::T* a_row = a_ptr + m * K;
+                    typename Tr::T* out_row = out_ptr + m * N;
+                    size_t n = n_tile;
+                    for (; n + 15 < n_max; n += 16) {
+                        for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+                            const size_t k_max = std::min(k_tile + TILE_SIZE, K);
+                            float32x4_t acc0 = vdupq_n_f32(0.0f), acc1 = vdupq_n_f32(0.0f);
+                            float32x4_t acc2 = vdupq_n_f32(0.0f), acc3 = vdupq_n_f32(0.0f);
+                            if (k_tile != 0) {
+                                acc0 = Tr::load4(out_row + n);
+                                acc1 = Tr::load4(out_row + n + 4);
+                                acc2 = Tr::load4(out_row + n + 8);
+                                acc3 = Tr::load4(out_row + n + 12);
+                            }
+                            for (size_t k = k_tile; k < k_max; ++k) {
+                                const float32x4_t va = vdupq_n_f32(Tr::load1(a_row + k));
+                                const typename Tr::T* b_row = b_ptr + k * N + n;
+                                acc0 = vfmaq_f32(acc0, va, Tr::load4(b_row));
+                                acc1 = vfmaq_f32(acc1, va, Tr::load4(b_row + 4));
+                                acc2 = vfmaq_f32(acc2, va, Tr::load4(b_row + 8));
+                                acc3 = vfmaq_f32(acc3, va, Tr::load4(b_row + 12));
+                            }
+                            Tr::store4(out_row + n, acc0);
+                            Tr::store4(out_row + n + 4, acc1);
+                            Tr::store4(out_row + n + 8, acc2);
+                            Tr::store4(out_row + n + 12, acc3);
+                        }
+                    }
+                    for (; n < n_max; ++n)
+                        matmul_scalar_cell<Tr>(a_row, b_ptr, out_row + n, K, N, n);
                 }
             }
         }
     }
+
+#if defined(__ARM_FEATURE_FP16_FML)
+    // f16 MatMul micro-kernel: 4x16 register block with B loads in fp16 and
+    // FMLAL doing the widening multiply-accumulate — no conversions in the
+    // inner loop, f32 accumulation precision.
+    static void matmul_rows_f16(const __fp16* a_ptr, const __fp16* b_ptr, __fp16* out_ptr,
+                                size_t K, size_t N, size_t m_start, size_t m_end) {
+        for (size_t m_tile = m_start; m_tile < m_end; m_tile += TILE_SIZE) {
+            for (size_t n_tile = 0; n_tile < N; n_tile += TILE_SIZE) {
+                const size_t m_max = std::min(m_tile + TILE_SIZE, m_end);
+                const size_t n_max = std::min(n_tile + TILE_SIZE, N);
+
+                size_t m = m_tile;
+                for (; m + 3 < m_max; m += 4) {
+                    const __fp16* a0 = a_ptr + m * K;
+                    const __fp16* a1 = a0 + K;
+                    const __fp16* a2 = a1 + K;
+                    const __fp16* a3 = a2 + K;
+                    __fp16* o0 = out_ptr + m * N;
+                    __fp16* o1 = o0 + N;
+                    __fp16* o2 = o1 + N;
+                    __fp16* o3 = o2 + N;
+
+                    size_t n = n_tile;
+                    for (; n + 15 < n_max; n += 16) {
+                        for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+                            const size_t k_max = std::min(k_tile + TILE_SIZE, K);
+                            float32x4_t c00 = vdupq_n_f32(0.0f), c01 = vdupq_n_f32(0.0f);
+                            float32x4_t c02 = vdupq_n_f32(0.0f), c03 = vdupq_n_f32(0.0f);
+                            float32x4_t c10 = vdupq_n_f32(0.0f), c11 = vdupq_n_f32(0.0f);
+                            float32x4_t c12 = vdupq_n_f32(0.0f), c13 = vdupq_n_f32(0.0f);
+                            float32x4_t c20 = vdupq_n_f32(0.0f), c21 = vdupq_n_f32(0.0f);
+                            float32x4_t c22 = vdupq_n_f32(0.0f), c23 = vdupq_n_f32(0.0f);
+                            float32x4_t c30 = vdupq_n_f32(0.0f), c31 = vdupq_n_f32(0.0f);
+                            float32x4_t c32 = vdupq_n_f32(0.0f), c33 = vdupq_n_f32(0.0f);
+                            if (k_tile != 0) {
+                                c00 = vcvt_f32_f16(vld1_f16(o0 + n));
+                                c01 = vcvt_f32_f16(vld1_f16(o0 + n + 4));
+                                c02 = vcvt_f32_f16(vld1_f16(o0 + n + 8));
+                                c03 = vcvt_f32_f16(vld1_f16(o0 + n + 12));
+                                c10 = vcvt_f32_f16(vld1_f16(o1 + n));
+                                c11 = vcvt_f32_f16(vld1_f16(o1 + n + 4));
+                                c12 = vcvt_f32_f16(vld1_f16(o1 + n + 8));
+                                c13 = vcvt_f32_f16(vld1_f16(o1 + n + 12));
+                                c20 = vcvt_f32_f16(vld1_f16(o2 + n));
+                                c21 = vcvt_f32_f16(vld1_f16(o2 + n + 4));
+                                c22 = vcvt_f32_f16(vld1_f16(o2 + n + 8));
+                                c23 = vcvt_f32_f16(vld1_f16(o2 + n + 12));
+                                c30 = vcvt_f32_f16(vld1_f16(o3 + n));
+                                c31 = vcvt_f32_f16(vld1_f16(o3 + n + 4));
+                                c32 = vcvt_f32_f16(vld1_f16(o3 + n + 8));
+                                c33 = vcvt_f32_f16(vld1_f16(o3 + n + 12));
+                            }
+                            for (size_t k = k_tile; k < k_max; ++k) {
+                                const float16x8_t vb0 = vld1q_f16(b_ptr + k * N + n);
+                                const float16x8_t vb1 = vld1q_f16(b_ptr + k * N + n + 8);
+                                float16x8_t va = vdupq_n_f16(a0[k]);
+                                c00 = vfmlalq_low_f16(c00, va, vb0);
+                                c01 = vfmlalq_high_f16(c01, va, vb0);
+                                c02 = vfmlalq_low_f16(c02, va, vb1);
+                                c03 = vfmlalq_high_f16(c03, va, vb1);
+                                va = vdupq_n_f16(a1[k]);
+                                c10 = vfmlalq_low_f16(c10, va, vb0);
+                                c11 = vfmlalq_high_f16(c11, va, vb0);
+                                c12 = vfmlalq_low_f16(c12, va, vb1);
+                                c13 = vfmlalq_high_f16(c13, va, vb1);
+                                va = vdupq_n_f16(a2[k]);
+                                c20 = vfmlalq_low_f16(c20, va, vb0);
+                                c21 = vfmlalq_high_f16(c21, va, vb0);
+                                c22 = vfmlalq_low_f16(c22, va, vb1);
+                                c23 = vfmlalq_high_f16(c23, va, vb1);
+                                va = vdupq_n_f16(a3[k]);
+                                c30 = vfmlalq_low_f16(c30, va, vb0);
+                                c31 = vfmlalq_high_f16(c31, va, vb0);
+                                c32 = vfmlalq_low_f16(c32, va, vb1);
+                                c33 = vfmlalq_high_f16(c33, va, vb1);
+                            }
+                            vst1_f16(o0 + n, vcvt_f16_f32(c00));
+                            vst1_f16(o0 + n + 4, vcvt_f16_f32(c01));
+                            vst1_f16(o0 + n + 8, vcvt_f16_f32(c02));
+                            vst1_f16(o0 + n + 12, vcvt_f16_f32(c03));
+                            vst1_f16(o1 + n, vcvt_f16_f32(c10));
+                            vst1_f16(o1 + n + 4, vcvt_f16_f32(c11));
+                            vst1_f16(o1 + n + 8, vcvt_f16_f32(c12));
+                            vst1_f16(o1 + n + 12, vcvt_f16_f32(c13));
+                            vst1_f16(o2 + n, vcvt_f16_f32(c20));
+                            vst1_f16(o2 + n + 4, vcvt_f16_f32(c21));
+                            vst1_f16(o2 + n + 8, vcvt_f16_f32(c22));
+                            vst1_f16(o2 + n + 12, vcvt_f16_f32(c23));
+                            vst1_f16(o3 + n, vcvt_f16_f32(c30));
+                            vst1_f16(o3 + n + 4, vcvt_f16_f32(c31));
+                            vst1_f16(o3 + n + 8, vcvt_f16_f32(c32));
+                            vst1_f16(o3 + n + 12, vcvt_f16_f32(c33));
+                        }
+                    }
+                    for (; n < n_max; ++n) {
+                        matmul_scalar_cell<F16Traits>(a0, b_ptr, o0 + n, K, N, n);
+                        matmul_scalar_cell<F16Traits>(a1, b_ptr, o1 + n, K, N, n);
+                        matmul_scalar_cell<F16Traits>(a2, b_ptr, o2 + n, K, N, n);
+                        matmul_scalar_cell<F16Traits>(a3, b_ptr, o3 + n, K, N, n);
+                    }
+                }
+                for (; m < m_max; ++m) {
+                    const __fp16* a_row = a_ptr + m * K;
+                    __fp16* out_row = out_ptr + m * N;
+                    size_t n = n_tile;
+                    for (; n + 15 < n_max; n += 16) {
+                        for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+                            const size_t k_max = std::min(k_tile + TILE_SIZE, K);
+                            float32x4_t acc0 = vdupq_n_f32(0.0f), acc1 = vdupq_n_f32(0.0f);
+                            float32x4_t acc2 = vdupq_n_f32(0.0f), acc3 = vdupq_n_f32(0.0f);
+                            if (k_tile != 0) {
+                                acc0 = vcvt_f32_f16(vld1_f16(out_row + n));
+                                acc1 = vcvt_f32_f16(vld1_f16(out_row + n + 4));
+                                acc2 = vcvt_f32_f16(vld1_f16(out_row + n + 8));
+                                acc3 = vcvt_f32_f16(vld1_f16(out_row + n + 12));
+                            }
+                            for (size_t k = k_tile; k < k_max; ++k) {
+                                const float16x8_t va = vdupq_n_f16(a_row[k]);
+                                const float16x8_t vb0 = vld1q_f16(b_ptr + k * N + n);
+                                const float16x8_t vb1 = vld1q_f16(b_ptr + k * N + n + 8);
+                                acc0 = vfmlalq_low_f16(acc0, va, vb0);
+                                acc1 = vfmlalq_high_f16(acc1, va, vb0);
+                                acc2 = vfmlalq_low_f16(acc2, va, vb1);
+                                acc3 = vfmlalq_high_f16(acc3, va, vb1);
+                            }
+                            vst1_f16(out_row + n, vcvt_f16_f32(acc0));
+                            vst1_f16(out_row + n + 4, vcvt_f16_f32(acc1));
+                            vst1_f16(out_row + n + 8, vcvt_f16_f32(acc2));
+                            vst1_f16(out_row + n + 12, vcvt_f16_f32(acc3));
+                        }
+                    }
+                    for (; n < n_max; ++n)
+                        matmul_scalar_cell<F16Traits>(a_row, b_ptr, out_row + n, K, N, n);
+                }
+            }
+        }
+    }
+#endif
 
     // out = A . B^T with B^T supplied row-major [N, K]: one dot product per
     // output element, both operands stream with unit stride.
@@ -533,9 +810,15 @@ namespace kern::ops {
             const __fp16* a_ptr = static_cast<const __fp16*>(a.data());
             const __fp16* b_ptr = static_cast<const __fp16*>(b.data());
             __fp16* out_ptr = static_cast<__fp16*>(out.data());
+#if defined(__ARM_FEATURE_FP16_FML)
+            parallel_for(M, 1, [=](size_t s, size_t e) {
+                matmul_rows_f16(a_ptr, b_ptr, out_ptr, K, N, s, e);
+            });
+#else
             parallel_for(M, 1, [=](size_t s, size_t e) {
                 matmul_rows<F16Traits>(a_ptr, b_ptr, out_ptr, K, N, s, e);
             });
+#endif
         } else throw std::runtime_error("Unsupported dtype for MatMul operation.");
     }
 

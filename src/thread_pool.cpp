@@ -1,9 +1,19 @@
 #include <kern/thread_pool.hpp>
 
+#if defined(__APPLE__)
+#include <pthread.h>
+#endif
+
 namespace kern {
     ThreadPool::ThreadPool(const size_t num_threads) : stop(false) {
         for (size_t i = 0; i < num_threads; ++i) {
             workers.emplace_back([this] {
+#if defined(__APPLE__)
+                // Bias the scheduler toward P-cores: kernel workers carry no
+                // QoS by default and macOS is free to run them on E-cores,
+                // which shows up as large per-iteration jitter.
+                pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+#endif
                 while (true) {
                     std::function<void()> task;
                     {

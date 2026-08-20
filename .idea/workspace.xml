@@ -28,18 +28,12 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="ops optimization">
-      <change afterPath="$PROJECT_DIR$/include/kern/graph.hpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/graph.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/fp16_test.cpp" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tests/graph_test.cpp" afterDir="false" />
+    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="VecMat added. Fp16 support added">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/include/kern/ops.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/include/kern/ops.hpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ops.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ops.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/thread_pool.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/thread_pool.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/bench_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/bench_test.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/main.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/tests.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/tests.hpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -78,23 +72,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.000000000000005" />
-      <entry key="MS500" value="1.0027641031732937" />
-      <entry key="S2" value="1.8070706094070048" />
-      <entry key="S5" value="4.383430825764869" />
-      <entry key="S10" value="6.920173532768687" />
-      <entry key="S30" value="9.88202767689581" />
-      <entry key="S60" value="10.874997570402122" />
-      <entry key="M2" value="11.419812725475737" />
-      <entry key="M5" value="11.763518518449423" />
-      <entry key="M10" value="11.881010867288312" />
-      <entry key="M15" value="11.920506551596992" />
-      <entry key="M30" value="11.960302096949022" />
-      <entry key="H1" value="12.042311073046605" />
-      <entry key="H2" value="13.551607127654997" />
-      <entry key="H4" value="20.54221635908593" />
-      <entry key="D1" value="70.00188203306274" />
-      <entry key="W1" value="388.29900355044015" />
+      <entry key="MS100" value="1.020077097259625" />
+      <entry key="MS500" value="1.6174202837239509" />
+      <entry key="S2" value="3.078303700377683" />
+      <entry key="S5" value="4.822748929038495" />
+      <entry key="S10" value="6.4784103256244405" />
+      <entry key="S30" value="8.497660753956978" />
+      <entry key="S60" value="9.196238474380454" />
+      <entry key="M2" value="9.598642583555783" />
+      <entry key="M5" value="10.652620103094922" />
+      <entry key="M10" value="13.056258984156015" />
+      <entry key="M15" value="14.853957557613663" />
+      <entry key="M30" value="17.648250400214827" />
+      <entry key="H1" value="19.63353723531282" />
+      <entry key="H2" value="22.122575243651095" />
+      <entry key="H4" value="29.431112768984548" />
+      <entry key="D1" value="79.35765607057986" />
+      <entry key="W1" value="397.78687007100683" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -105,34 +99,34 @@
       <entry key="S30" value="0.0" />
       <entry key="S60" value="0.0" />
       <entry key="M2" value="0.0" />
-      <entry key="M5" value="1.9217676459708357E-264" />
-      <entry key="M10" value="1.960490736219009E-132" />
-      <entry key="M15" value="1.9735723508855568E-88" />
-      <entry key="M30" value="1.9867419069751095E-44" />
-      <entry key="H1" value="1.9933598491242022E-22" />
-      <entry key="H2" value="1.99669871147753E-11" />
-      <entry key="H4" value="6.377240257160851E-6" />
-      <entry key="D1" value="2.48901220923656" />
-      <entry key="W1" value="49.96526654572833" />
+      <entry key="M5" value="1.3439151090877337E-265" />
+      <entry key="M10" value="5.184421154185198E-133" />
+      <entry key="M15" value="8.13098896908057E-89" />
+      <entry key="M30" value="1.2752243957541385E-44" />
+      <entry key="H1" value="1.5970123926745268E-22" />
+      <entry key="H2" value="1.7872027648322466E-11" />
+      <entry key="H4" value="6.033418129598243E-6" />
+      <entry key="D1" value="2.466127168893226" />
+      <entry key="W1" value="49.89937760112174" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9659363289248503" />
-      <entry key="MS500" value="0.9958033984922736" />
-      <entry key="S2" value="1.8023850479854047" />
-      <entry key="S5" value="4.3788284712390695" />
-      <entry key="S10" value="6.916774106929092" />
-      <entry key="S30" value="9.880508748244015" />
-      <entry key="S60" value="10.874176486556417" />
-      <entry key="M2" value="11.419385524957024" />
-      <entry key="M5" value="11.763343466924228" />
-      <entry key="M10" value="11.880922631297377" />
-      <entry key="M15" value="11.920447568641682" />
-      <entry key="M30" value="11.960272525511613" />
-      <entry key="H1" value="12.042296223563177" />
-      <entry key="H2" value="13.551599183153366" />
-      <entry key="H4" value="20.54221758547254" />
-      <entry key="D1" value="72.49078681441173" />
-      <entry key="W1" value="438.26395053792" />
+      <entry key="MS100" value="0.9854644169040973" />
+      <entry key="MS500" value="1.6070985499417259" />
+      <entry key="S2" value="3.073694848719729" />
+      <entry key="S5" value="4.819939968623953" />
+      <entry key="S10" value="6.476547079896454" />
+      <entry key="S30" value="8.496852763737428" />
+      <entry key="S60" value="9.195802101471742" />
+      <entry key="M2" value="9.598414857359181" />
+      <entry key="M5" value="10.652514708924869" />
+      <entry key="M10" value="13.056188682734762" />
+      <entry key="M15" value="14.853901857277124" />
+      <entry key="M30" value="17.648215675273747" />
+      <entry key="H1" value="19.63351745533326" />
+      <entry key="H2" value="22.122564188384313" />
+      <entry key="H4" value="29.43111195640213" />
+      <entry key="D1" value="81.8236764704186" />
+      <entry key="W1" value="447.68592848829104" />
     </decayedShown>
   </component>
   <component name="ProjectApplicationVersion">
@@ -257,7 +251,6 @@
     <isAutomaticBootstrapAfterUpdate value="false" />
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="Shape class implementation" />
     <MESSAGE value="version, dtype and shape testing implemented" />
     <MESSAGE value="test update" />
     <MESSAGE value="tensor.hpp declaration" />
@@ -282,7 +275,8 @@
     <MESSAGE value="MatMul pretransposed implementation" />
     <MESSAGE value="MatMul pretransposed optimization aand debugging" />
     <MESSAGE value="ops optimization" />
-    <option name="LAST_COMMIT_MESSAGE" value="ops optimization" />
+    <MESSAGE value="VecMat added. Fp16 support added" />
+    <option name="LAST_COMMIT_MESSAGE" value="VecMat added. Fp16 support added" />
   </component>
   <component name="XSLT-Support.FileAssociations.UIState">
     <expand />

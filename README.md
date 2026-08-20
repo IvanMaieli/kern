@@ -35,6 +35,13 @@ All compute-heavy kernels share one dispatch primitive: `parallel_for(total, min
 ### 5. Dtype Traits: float16 Without a Second Kernel Library
 `F32Traits` and `F16Traits` provide `load4/store4/load1/store1`; every templated kernel body (Add, ReLU, GELU, Softmax, LayerNorm, MatMul, MatMulTransposed, MatVec) is written once against the traits. For float16, loading converts `__fp16` vectors to float32 lanes (`vcvt_f32_f16`) and storing converts back — so the fp16 result equals the fp32 kernel applied to rounded inputs, with half the bytes streamed from memory. Zero is an all-zero byte pattern in both formats, so the tiled-MatMul zero-fill stays a plain `memset`.
 
+Where conversion throughput would cap performance (dot products, the MatMul micro-kernel), the traits path is bypassed for **FMLAL** kernels (`vfmlalq_low/high_f16`, guarded by `__ARM_FEATURE_FP16_FML`): fp16 loads feed a widening multiply-accumulate into fp32 accumulators directly — no conversion instructions, 8 elements per vector pair, and fp32 accumulation precision. Toolchains or targets without `fp16fml` fall back to the conversion kernels automatically.
+
+### 5b. Register-Blocked Micro-Kernels
+Two throughput techniques applied throughout the compute kernels:
+*   **Independent FMA chains:** a single accumulator vector serializes on FMA latency (~4 cycles); every dot product and the MatMul micro-kernel keep 4+ independent chains so both FMA pipes stay busy.
+*   **4x16 register micro-tiles in MatMul:** inside a 64x64 tile, 16 accumulators cover 4 rows x 16 output columns, so each 4-vector B load feeds 16 FMAs — the inner loop is FMA-bound instead of load-bound (a 1-row block pays one B load per 4 FMAs and wastes ~2x). `out` is read/written once per k-tile instead of once per k step (64x less output traffic), and the first k-tile defines the tile from zero so stale destination buffers never leak into results. The f16 variant runs the same shape with FMLAL widening multiply-accumulates.
+
 ### 6. MatVec: the Decode-Path GEMV
 `out[M] = A[M,K] · v[K]` is the shape LLM decoding hits every token (M = 1). With so few rows, row-parallelism cannot fill the pool, so `MatVec` chooses between two strategies:
 *   **M ≥ core count:** parallel over rows, one NEON dot product per row.
@@ -80,19 +87,21 @@ We rigorously benchmark core operators to track improvements. Below is the histo
 | **Multicore (std::jthread)** | Parallelized over M rows | ~170 ms | ~20.5x |
 | **Tiled + ThreadPool** | M-N-K 64x64 tiles, persistent pool, 2x-unrolled FMA | ~8 ms | ~440x |
 
-Current operator benchmarks (Release build, M-series):
+Current operator benchmarks (Release build, M-series; median of 20–30 iterations after warm-up):
 
-| Operator | Shape | Execution Time |
-| :--- | :--- | :--- |
-| MatMul (f32) | 512x512 | ~7.5 ms |
-| MatMulTransposed (f32) | 512x512 (B supplied as B^T) | ~3.7 ms |
-| MatMulTransposed (f16) | 512x512 | ~3.0 ms |
-| MatVec (f32) | [4096x4096]·[4096] | ~0.70 ms/iter |
-| MatVec (f16) | [4096x4096]·[4096] | ~0.53 ms/iter |
-| Broadcast Add | 512x512 + 512 | ~0.04 ms |
-| GELU | 512x2048 | ~0.17 ms/iter |
+| Operator | Shape | Median | p99 | Throughput |
+| :--- | :--- | :--- | :--- | :--- |
+| MatMul (f32) | 512x512 | ~0.72 ms | ~0.82 ms | ~370 GFLOPS (~63% of 4-P-core peak) |
+| MatMulTransposed (f32) | 512x512 (B as B^T) | ~1.39 ms | ~1.48 ms | ~195 GFLOPS |
+| MatMulTransposed (f16) | 512x512 | ~0.84 ms | ~0.93 ms | ~320 GFLOPS |
+| MatVec (f32) | [4096x4096]·[4096] | ~0.47 ms | ~0.51 ms | ~135 GB/s |
+| MatVec (f16) | [4096x4096]·[4096] | ~0.23 ms | ~0.24 ms | ~145 GB/s (≈ peak) |
+| Broadcast Add | 512x512 + 512 | ~0.02 ms | | |
+| GELU | 512x2048 | ~0.13 ms/iter | | |
 
-On bandwidth-bound operators, float16 currently yields **~1.25–1.3x** rather than the theoretical 2x: once the bytes streamed are halved, the f16→f32 conversion becomes the bottleneck. Approaching 2x requires native `vfmlaq_f16` accumulation (with periodic f32 flushes for precision) — see the roadmap.
+Two scaling notes worth knowing:
+*   With the 4x16 register-blocked micro-kernel, plain `MatMul` on row-major B now **outperforms `MatMulTransposed`** (~370 vs ~195 GFLOPS): the register block amortizes each B load across 4 rows, which the dot-product layout cannot. `MatMulTransposed` remains the right shape for `M = 1` decode work (see `MatVec`), but batched matmuls should use `MatMul`.
+*   Thread-pool workers set `QOS_CLASS_USER_INITIATED` on Apple platforms so the scheduler biases them onto P-cores; combined with median/p99 benchmark reporting, per-iteration jitter dropped from ~65% to ~10%.
 
 *Note: Benchmarks are averaged over multiple iterations using `std::chrono` on an M-series Apple Silicon chip (`kern-tests` bench suite, Release build).*
 
@@ -132,8 +141,7 @@ The test suite covers: shape/stride semantics, zero-copy views, broadcasting (in
 
 ## Roadmap for Future Development
 
-*   ~~Multicore Parallelization~~, ~~Tiled MatMul~~, ~~Decode-Path GEMV~~, ~~float16 kernels~~ and ~~Graph Execution Engine~~: shipped.
-*   **Native fp16 FMA (`vfmlaq_f16`):** accumulate directly in half-precision lanes with periodic f32 flushes, to push fp16 toward its full 2x bandwidth advantage.
+*   ~~Multicore Parallelization~~, ~~Tiled MatMul~~, ~~Decode-Path GEMV~~, ~~float16 kernels~~, ~~Graph Execution Engine~~ and ~~Native fp16 FMA (FMLAL)~~: shipped.
 *   **Attention + KV cache:** the next inference-graph operator; the arena planner already provides the memory discipline a bounded KV cache needs.
 *   **int8 / Quantized Kernels:** the dtype slot exists; kernels and dequantization paths do not.
 *   **Weight Loading:** import pretransposed fp16 weights from file (safetensors-style) to feed `Graph::add_param`.

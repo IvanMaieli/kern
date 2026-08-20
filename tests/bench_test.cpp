@@ -4,8 +4,30 @@
 #include <kern/shape.hpp>
 #include "test_macros.hpp"
 #include "tests.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <vector>
+
+// Distribution instead of a plain mean: multicore kernels jitter with
+// scheduler and frequency state, so the median/p99/min split tells whether
+// the code is slow or the machine was noisy.
+template <typename F>
+static void bench_dist(const char* label, int iters, F&& fn) {
+    for (int w = 0; w < 5; ++w) fn(); // warm-up: clocks, caches, QoS
+    std::vector<double> ms(static_cast<size_t>(iters));
+    for (int i = 0; i < iters; ++i) {
+        const auto start = std::chrono::high_resolution_clock::now();
+        fn();
+        const auto end = std::chrono::high_resolution_clock::now();
+        ms[static_cast<size_t>(i)] =
+            std::chrono::duration<double, std::milli>(end - start).count();
+    }
+    std::sort(ms.begin(), ms.end());
+    const size_t p99i = ms.size() - 1; // min(iters-1, 99% of 30)
+    std::printf("%s: median %.3f ms, p99 %.3f ms, min %.3f ms\n",
+                label, ms[ms.size() / 2], ms[p99i * 99 / 100], ms.front());
+}
 
 void test_bench_matmul() {
     constexpr size_t N = 512;
@@ -15,17 +37,7 @@ void test_bench_matmul() {
     const kern::Tensor t_b(shape, kern::DataType::float32);
     kern::Tensor t_out(shape, kern::DataType::float32);
 
-    // Warm-up (not strictly necessary for naive, but good practice)
-    kern::ops::MatMul(t_a, t_b, t_out);
-
-    const auto start = std::chrono::high_resolution_clock::now();
-    
-    kern::ops::MatMul(t_a, t_b, t_out);
-
-    const auto end = std::chrono::high_resolution_clock::now();
-    const std::chrono::duration<double, std::milli> duration = end - start;
-    
-    std::printf("MatMul %zux%zu took: %.3f ms\n", N, N, duration.count());
+    bench_dist("MatMul 512x512", 30, [&] { kern::ops::MatMul(t_a, t_b, t_out); });
 }
 
 void test_bench_add_broadcast() {
@@ -58,14 +70,8 @@ void test_bench_matmul_transposed() {
     kern::Tensor t_b_t(kern::Shape{N, N}, kern::DataType::float32);
     kern::Tensor t_out(kern::Shape{N, N}, kern::DataType::float32);
 
-    kern::ops::MatMulTransposed(t_a, t_b_t, t_out); // warm-up
-
-    const auto start = std::chrono::high_resolution_clock::now();
-    kern::ops::MatMulTransposed(t_a, t_b_t, t_out);
-    const auto end = std::chrono::high_resolution_clock::now();
-    const std::chrono::duration<double, std::milli> duration = end - start;
-
-    std::printf("MatMulTransposed %zux%zu took: %.3f ms\n", N, N, duration.count());
+    bench_dist("MatMulTransposed 512x512", 30,
+               [&] { kern::ops::MatMulTransposed(t_a, t_b_t, t_out); });
 }
 
 void test_bench_gelu() {
@@ -98,15 +104,7 @@ void test_bench_matvec() {
     kern::Tensor t_v(kern::Shape{K}, kern::DataType::float32);
     kern::Tensor t_out(kern::Shape{M}, kern::DataType::float32);
 
-    kern::ops::MatVec(t_a, t_v, t_out); // warm-up
-
-    const auto start = std::chrono::high_resolution_clock::now();
-    constexpr int iters = 20;
-    for (int it = 0; it < iters; ++it) kern::ops::MatVec(t_a, t_v, t_out);
-    const auto end = std::chrono::high_resolution_clock::now();
-    const std::chrono::duration<double, std::milli> duration = end - start;
-
-    std::printf("MatVec [%zux%zu].[%zu] took: %.3f ms/iter\n", M, K, K, duration.count() / iters);
+    bench_dist("MatVec [4096x4096].[4096]", 20, [&] { kern::ops::MatVec(t_a, t_v, t_out); });
 }
 
 void test_bench_matvec_f16() {
@@ -124,13 +122,7 @@ void test_bench_matvec_f16() {
 
     kern::ops::MatVec(t_a, t_v, t_out); // warm-up
 
-    const auto start = std::chrono::high_resolution_clock::now();
-    constexpr int iters = 20;
-    for (int it = 0; it < iters; ++it) kern::ops::MatVec(t_a, t_v, t_out);
-    const auto end = std::chrono::high_resolution_clock::now();
-    const std::chrono::duration<double, std::milli> duration = end - start;
-
-    std::printf("MatVec f16 [%zux%zu].[%zu] took: %.3f ms/iter\n", M, K, K, duration.count() / iters);
+    bench_dist("MatVec f16 [4096x4096].[4096]", 20, [&] { kern::ops::MatVec(t_a, t_v, t_out); });
 }
 
 void test_bench_matmultransposed_f16() {
@@ -149,11 +141,6 @@ void test_bench_matmultransposed_f16() {
 
     kern::ops::MatMulTransposed(t_a, t_b_t, t_out); // warm-up
 
-    const auto start = std::chrono::high_resolution_clock::now();
-    constexpr int iters = 10;
-    for (int it = 0; it < iters; ++it) kern::ops::MatMulTransposed(t_a, t_b_t, t_out);
-    const auto end = std::chrono::high_resolution_clock::now();
-    const std::chrono::duration<double, std::milli> duration = end - start;
-
-    std::printf("MatMulTransposed f16 %zux%zu took: %.3f ms/iter\n", N, N, duration.count() / iters);
+    bench_dist("MatMulTransposed f16 512x512", 30,
+               [&] { kern::ops::MatMulTransposed(t_a, t_b_t, t_out); });
 }
