@@ -4,7 +4,7 @@
 
 #include <kern/memory_pool.hpp>
 #include <new>
-#include "kern/tensor.hpp"
+#include <kern/tensor.hpp>
 
 namespace kern {
 

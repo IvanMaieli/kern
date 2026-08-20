@@ -27,7 +27,7 @@ add_library(kern
         src/buffer.cpp
         include/kern/ops.hpp
         src/ops.cpp
-        include/kern/config.hpp
+        include/kern/thread_pool.hpp
         src/thread_pool.cpp
 )
 

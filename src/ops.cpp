@@ -7,8 +7,8 @@
 #include <cmath>
 #include <arm_neon.h>
 #include <thread>
-#include <mutex>
-#include <condition_variable>
+#include <latch>
+#include <cstring>
 
 namespace kern::ops {
 
@@ -26,6 +26,47 @@ namespace kern::ops {
     static void require_contiguous(const Tensor& tensor, const std::string& op_name) {
         if (!tensor.shape().is_contiguous())
             throw std::invalid_argument(op_name + ": tensor must be contiguous.");
+    }
+
+    // Minimum work units per parallel task below which the operation runs
+    // single-threaded to avoid threading overhead dominating.
+    static constexpr size_t kMinChunk = 1024;
+
+    // Split [0, total) into at-most-hardware-concurrency chunks and dispatch
+    // each to the global thread pool.  Falls back to inline single-threaded
+    // execution when the per-task work is below min_work.
+    template <typename F>
+    static void parallel_for(size_t total, size_t min_work, F body) {
+        if (total == 0) return;
+
+        unsigned int hw = std::thread::hardware_concurrency();
+        if (hw == 0) hw = 2;
+
+        const size_t chunk = (total + hw - 1) / hw;
+
+        // Single-threaded when per-task work is too small.
+        if (chunk < min_work) {
+            body(0, total);
+            return;
+        }
+
+        // Count actual tasks (trailing threads may have no work).
+        unsigned int actual = 0;
+        for (unsigned int t = 0; t < hw; ++t)
+            if (t * chunk < total) ++actual;
+
+        std::latch done(actual);
+
+        for (unsigned int t = 0; t < actual; ++t) {
+            const size_t start = t * chunk;
+            const size_t end = std::min(start + chunk, total);
+            GetThreadPool().enqueue([=, &done]() {
+                body(start, end);
+                done.count_down();
+            });
+        }
+
+        done.wait();
     }
 
     Shape GetBroadcastShape(const Shape& a, const Shape& b) {
@@ -175,12 +216,12 @@ namespace kern::ops {
     void MatMul(const Tensor& a, const Tensor& b, Tensor& out) {
         if (a.shape().rank() != 2 || b.shape().rank() != 2 || out.shape().rank() != 2)
             throw std::invalid_argument("MatMul supports only 2D tensors for now.");
-        
+
         const size_t M = a.shape().dimension(0);
         const size_t K = a.shape().dimension(1);
         const size_t K_b = b.shape().dimension(0);
         const size_t N = b.shape().dimension(1);
-        
+
         if (K != K_b) throw std::invalid_argument("MatMul: Inner dimensions must match.");
         if (M != out.shape().dimension(0) || N != out.shape().dimension(1))
             throw std::invalid_argument("MatMul: Output shape is incompatible.");
@@ -195,69 +236,52 @@ namespace kern::ops {
             const float* __restrict b_ptr = static_cast<const float*>(b.data());
             float* __restrict out_ptr = static_cast<float*>(out.data());
 
-            unsigned int num_threads = std::thread::hardware_concurrency();
-            if (num_threads == 0) num_threads = 2;
-            std::condition_variable cv; std::mutex mtx; size_t tasks_completed = 0;
-            size_t rows_per_thread = (M + num_threads - 1) / num_threads;
-            unsigned int actual_tasks = 0;
-            for (unsigned int t = 0; t < num_threads; ++t) {
-                size_t m_start = t * rows_per_thread;
-                size_t m_end = std::min(m_start + rows_per_thread, M);
-                if (m_start >= m_end) break;
-                actual_tasks++;
-            }
-            for (unsigned int t = 0; t < actual_tasks; ++t) {
-                size_t m_start = t * rows_per_thread;
-                size_t m_end = std::min(m_start + rows_per_thread, M);
-                GetThreadPool().enqueue([=, &tasks_completed, &cv, &mtx]() {
-                    // M-N-K tiling for better cache locality
-                    for (size_t m_tile = m_start; m_tile < m_end; m_tile += TILE_SIZE) {
-                        for (size_t n_tile = 0; n_tile < N; n_tile += TILE_SIZE) {
-                            const size_t m_max = std::min(m_tile + TILE_SIZE, m_end);
-                            const size_t n_max = std::min(n_tile + TILE_SIZE, N);
+            // Each row already does O(K*N) work, so min_work = 1 is
+            // enough to justify parallel overhead.
+            parallel_for(M, 1, [=](size_t m_start, size_t m_end) {
+                // M-N-K tiling for better cache locality
+                for (size_t m_tile = m_start; m_tile < m_end; m_tile += TILE_SIZE) {
+                    for (size_t n_tile = 0; n_tile < N; n_tile += TILE_SIZE) {
+                        const size_t m_max = std::min(m_tile + TILE_SIZE, m_end);
+                        const size_t n_max = std::min(n_tile + TILE_SIZE, N);
 
-                            // The k-tile passes below accumulate into out, so the
-                            // tile must start from zero: the caller's buffer may
-                            // hold a previous result or garbage (aligned_alloc
-                            // does not zero-initialize).
-                            for (size_t m = m_tile; m < m_max; ++m)
-                                std::fill(out_ptr + m * N + n_tile, out_ptr + m * N + n_max, 0.0f);
+                        // Zero the output tile so the accumulation below
+                        // produces correct results even when the output buffer
+                        // holds stale data from a previous call.
+                        for (size_t m = m_tile; m < m_max; ++m)
+                            std::memset(out_ptr + m * N + n_tile, 0,
+                                        (n_max - n_tile) * sizeof(float));
 
-                            for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
-                                const size_t k_max = std::min(k_tile + TILE_SIZE, K);
+                        for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+                            const size_t k_max = std::min(k_tile + TILE_SIZE, K);
 
-                                for (size_t m = m_tile; m < m_max; ++m) {
-                                    const float* a_row = a_ptr + m * K;
-                                    float* out_row = out_ptr + m * N;
-                                    for (size_t k = k_tile; k < k_max; ++k) {
-                                        const float a_val = a_row[k];
-                                        const float32x4_t va_val = vdupq_n_f32(a_val);
-                                        const float* b_row = b_ptr + k * N;
-                                        
-                                        size_t n = n_tile;
-                                        for (; n + 7 < n_max; n += 8) {
-                                            float32x4_t vb1 = vld1q_f32(b_row + n);
-                                            float32x4_t vout1 = vld1q_f32(out_row + n);
-                                            vout1 = vfmaq_f32(vout1, va_val, vb1);
-                                            vst1q_f32(out_row + n, vout1);
-                                            
-                                            float32x4_t vb2 = vld1q_f32(b_row + n + 4);
-                                            float32x4_t vout2 = vld1q_f32(out_row + n + 4);
-                                            vout2 = vfmaq_f32(vout2, va_val, vb2);
-                                            vst1q_f32(out_row + n + 4, vout2);
-                                        }
-                                        for (; n < n_max; ++n) out_row[n] += a_val * b_row[n];
+                            for (size_t m = m_tile; m < m_max; ++m) {
+                                const float* a_row = a_ptr + m * K;
+                                float* out_row = out_ptr + m * N;
+                                for (size_t k = k_tile; k < k_max; ++k) {
+                                    const float a_val = a_row[k];
+                                    const float32x4_t va_val = vdupq_n_f32(a_val);
+                                    const float* b_row = b_ptr + k * N;
+
+                                    size_t n = n_tile;
+                                    for (; n + 7 < n_max; n += 8) {
+                                        float32x4_t vb1 = vld1q_f32(b_row + n);
+                                        float32x4_t vout1 = vld1q_f32(out_row + n);
+                                        vout1 = vfmaq_f32(vout1, va_val, vb1);
+                                        vst1q_f32(out_row + n, vout1);
+
+                                        float32x4_t vb2 = vld1q_f32(b_row + n + 4);
+                                        float32x4_t vout2 = vld1q_f32(out_row + n + 4);
+                                        vout2 = vfmaq_f32(vout2, va_val, vb2);
+                                        vst1q_f32(out_row + n + 4, vout2);
                                     }
+                                    for (; n < n_max; ++n) out_row[n] += a_val * b_row[n];
                                 }
                             }
                         }
                     }
-                    std::lock_guard<std::mutex> lock(mtx);
-                    if (++tasks_completed == actual_tasks) cv.notify_one();
-                });
-            }
-            std::unique_lock<std::mutex> lock(mtx);
-            cv.wait(lock, [&] { return tasks_completed == actual_tasks; });
+                }
+            });
         } else throw std::runtime_error("Unsupported dtype for MatMul operation.");
     }
 
@@ -281,43 +305,26 @@ namespace kern::ops {
             const float* __restrict a_ptr = static_cast<const float*>(a.data());
             const float* __restrict b_ptr = static_cast<const float*>(b_t.data());
             float* __restrict out_ptr = static_cast<float*>(out.data());
-            unsigned int num_threads = std::thread::hardware_concurrency();
-            if (num_threads == 0) num_threads = 2;
-            std::condition_variable cv; std::mutex mtx; size_t tasks_completed = 0;
-            size_t rows_per_thread = (M + num_threads - 1) / num_threads;
-            unsigned int actual_tasks = 0;
-            for (unsigned int t = 0; t < num_threads; ++t) {
-                size_t m_start = t * rows_per_thread;
-                size_t m_end = std::min(m_start + rows_per_thread, M);
-                if (m_start >= m_end) break;
-                actual_tasks++;
-            }
-            for (unsigned int t = 0; t < actual_tasks; ++t) {
-                size_t m_start = t * rows_per_thread;
-                size_t m_end = std::min(m_start + rows_per_thread, M);
-                GetThreadPool().enqueue([=, &tasks_completed, &cv, &mtx]() {
-                    // Contiguity is guaranteed by the guards above, so plain
-                    // row pointers replace the per-access linear_index calls.
-                    for (size_t m = m_start; m < m_end; ++m) {
-                        const float* a_row = a_ptr + m * K;
-                        float* out_row = out_ptr + m * N;
-                        for (size_t n = 0; n < N; ++n) {
-                            const float* b_row = b_ptr + n * K;
-                            float32x4_t acc = vdupq_n_f32(0.0f);
-                            size_t k = 0;
-                            for (; k + 3 < K; k += 4)
-                                acc = vfmaq_f32(acc, vld1q_f32(a_row + k), vld1q_f32(b_row + k));
-                            float sum = vaddvq_f32(acc);
-                            for (; k < K; ++k) sum += a_row[k] * b_row[k];
-                            out_row[n] = sum;
-                        }
+
+            // Each row does O(K*N) work — min_work = 1.
+            parallel_for(M, 1, [=](size_t m_start, size_t m_end) {
+                // Contiguity is guaranteed by the guards above, so plain
+                // row pointers replace the per-access linear_index calls.
+                for (size_t m = m_start; m < m_end; ++m) {
+                    const float* a_row = a_ptr + m * K;
+                    float* out_row = out_ptr + m * N;
+                    for (size_t n = 0; n < N; ++n) {
+                        const float* b_row = b_ptr + n * K;
+                        float32x4_t acc = vdupq_n_f32(0.0f);
+                        size_t k = 0;
+                        for (; k + 3 < K; k += 4)
+                            acc = vfmaq_f32(acc, vld1q_f32(a_row + k), vld1q_f32(b_row + k));
+                        float sum = vaddvq_f32(acc);
+                        for (; k < K; ++k) sum += a_row[k] * b_row[k];
+                        out_row[n] = sum;
                     }
-                    std::lock_guard<std::mutex> lock(mtx);
-                    if (++tasks_completed == actual_tasks) cv.notify_one();
-                });
-            }
-            std::unique_lock<std::mutex> lock(mtx);
-            cv.wait(lock, [&] { return tasks_completed == actual_tasks; });
+                }
+            });
         } else throw std::runtime_error("Unsupported dtype for MatMulTransposed operation.");
     }
 
@@ -329,32 +336,13 @@ namespace kern::ops {
             const float* __restrict in_ptr = static_cast<const float*>(in.data());
             float* __restrict out_ptr = static_cast<float*>(out.data());
             const size_t n = in.shape().element_count();
-            unsigned int num_threads = std::thread::hardware_concurrency();
-            if (num_threads == 0) num_threads = 2;
-            std::condition_variable cv; std::mutex mtx; size_t tasks_completed = 0;
-            size_t chunk_size = (n + num_threads - 1) / num_threads;
-            unsigned int actual_tasks = 0;
-            for (unsigned int t = 0; t < num_threads; ++t) {
-                size_t start = t * chunk_size;
-                size_t end = std::min(start + chunk_size, n);
-                if (start >= end) break;
-                actual_tasks++;
-            }
-            for (unsigned int t = 0; t < actual_tasks; ++t) {
-                size_t start = t * chunk_size;
-                size_t end = std::min(start + chunk_size, n);
-                GetThreadPool().enqueue([=, &tasks_completed, &cv, &mtx]() {
-                    const float32x4_t vzero = vdupq_n_f32(0.0f);
-                    size_t i = start;
-                    for (; i + 3 < end; i += 4)
-                        vst1q_f32(out_ptr + i, vmaxq_f32(vld1q_f32(in_ptr + i), vzero));
-                    for (; i < end; ++i) out_ptr[i] = std::max(0.0f, in_ptr[i]);
-                    std::lock_guard<std::mutex> lock(mtx);
-                    if (++tasks_completed == actual_tasks) cv.notify_one();
-                });
-            }
-            std::unique_lock<std::mutex> lock(mtx);
-            cv.wait(lock, [&] { return tasks_completed == actual_tasks; });
+            parallel_for(n, kMinChunk, [=](size_t start, size_t end) {
+                const float32x4_t vzero = vdupq_n_f32(0.0f);
+                size_t i = start;
+                for (; i + 3 < end; i += 4)
+                    vst1q_f32(out_ptr + i, vmaxq_f32(vld1q_f32(in_ptr + i), vzero));
+                for (; i < end; ++i) out_ptr[i] = std::max(0.0f, in_ptr[i]);
+            });
         } else throw std::runtime_error("Unsupported dtype for ReLU operation.");
     }
 
@@ -384,43 +372,24 @@ namespace kern::ops {
             const float* __restrict in_ptr = static_cast<const float*>(in.data());
             float* __restrict out_ptr = static_cast<float*>(out.data());
             const size_t n = in.shape().element_count();
-            unsigned int num_threads = std::thread::hardware_concurrency();
-            if (num_threads == 0) num_threads = 2;
-            std::condition_variable cv; std::mutex mtx; size_t tasks_completed = 0;
-            size_t chunk_size = (n + num_threads - 1) / num_threads;
-            unsigned int actual_tasks = 0;
-            for (unsigned int t = 0; t < num_threads; ++t) {
-                size_t start = t * chunk_size;
-                size_t end = std::min(start + chunk_size, n);
-                if (start >= end) break;
-                actual_tasks++;
-            }
-            for (unsigned int t = 0; t < actual_tasks; ++t) {
-                size_t start = t * chunk_size;
-                size_t end = std::min(start + chunk_size, n);
-                GetThreadPool().enqueue([=, &tasks_completed, &cv, &mtx]() {
-                    const float k1 = 0.7978845608f;
-                    const float k2 = 0.044715f;
-                    const float k13 = k1 * k2; // x * (k1 + k13*x^2) == k1 * (x + k2*x^3)
-                    size_t i = start;
-                    for (; i + 3 < end; i += 4) {
-                        const float32x4_t vx = vld1q_f32(in_ptr + i);
-                        const float32x4_t vx2 = vmulq_f32(vx, vx);
-                        const float32x4_t vu = vmulq_f32(vx, vfmaq_f32(vdupq_n_f32(k1), vx2, vdupq_n_f32(k13)));
-                        const float32x4_t vt = neon_tanh(vu);
-                        const float32x4_t vres = vmulq_f32(vx, vaddq_f32(vdupq_n_f32(1.0f), vt));
-                        vst1q_f32(out_ptr + i, vmulq_n_f32(vres, 0.5f));
-                    }
-                    for (; i < end; ++i) {
-                        const float x = in_ptr[i];
-                        out_ptr[i] = 0.5f * x * (1.0f + std::tanh(k1 * (x + k2 * x * x * x)));
-                    }
-                    std::lock_guard<std::mutex> lock(mtx);
-                    if (++tasks_completed == actual_tasks) cv.notify_one();
-                });
-            }
-            std::unique_lock<std::mutex> lock(mtx);
-            cv.wait(lock, [&] { return tasks_completed == actual_tasks; });
+            parallel_for(n, kMinChunk, [=](size_t start, size_t end) {
+                const float k1 = 0.7978845608f;
+                const float k2 = 0.044715f;
+                const float k13 = k1 * k2; // x * (k1 + k13*x^2) == k1 * (x + k2*x^3)
+                size_t i = start;
+                for (; i + 3 < end; i += 4) {
+                    const float32x4_t vx = vld1q_f32(in_ptr + i);
+                    const float32x4_t vx2 = vmulq_f32(vx, vx);
+                    const float32x4_t vu = vmulq_f32(vx, vfmaq_f32(vdupq_n_f32(k1), vx2, vdupq_n_f32(k13)));
+                    const float32x4_t vt = neon_tanh(vu);
+                    const float32x4_t vres = vmulq_f32(vx, vaddq_f32(vdupq_n_f32(1.0f), vt));
+                    vst1q_f32(out_ptr + i, vmulq_n_f32(vres, 0.5f));
+                }
+                for (; i < end; ++i) {
+                    const float x = in_ptr[i];
+                    out_ptr[i] = 0.5f * x * (1.0f + std::tanh(k1 * (x + k2 * x * x * x)));
+                }
+            });
         } else throw std::runtime_error("Unsupported dtype for GELU operation.");
     }
 
@@ -435,39 +404,39 @@ namespace kern::ops {
         const float* __restrict in_ptr = static_cast<const float*>(in.data());
         float* __restrict out_ptr = static_cast<float*>(out.data());
 
-        unsigned int num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0) num_threads = 2;
-        std::condition_variable cv; std::mutex mtx; size_t tasks_completed = 0;
-        size_t rows_per_thread = (num_rows + num_threads - 1) / num_threads;
-        unsigned int actual_tasks = 0;
-        for (unsigned int t = 0; t < num_threads; ++t) {
-            size_t start_row = t * rows_per_thread;
-            size_t end_row = std::min(start_row + rows_per_thread, num_rows);
-            if (start_row >= end_row) break;
-            actual_tasks++;
-        }
-        for (unsigned int t = 0; t < actual_tasks; ++t) {
-            size_t start_row = t * rows_per_thread;
-            size_t end_row = std::min(start_row + rows_per_thread, num_rows);
-            GetThreadPool().enqueue([=, &tasks_completed, &cv, &mtx]() {
-                for (size_t i = start_row; i < end_row; ++i) {
-                    const float* row_in = in_ptr + i * last_dim;
-                    float* row_out = out_ptr + i * last_dim;
-                    float max_val = -std::numeric_limits<float>::infinity();
-                    for (size_t j = 0; j < last_dim; ++j) max_val = std::max(max_val, row_in[j]);
-                    float sum = 0.0f;
-                    for (size_t j = 0; j < last_dim; ++j) {
-                        row_out[j] = std::exp(row_in[j] - max_val);
-                        sum += row_out[j];
-                    }
-                    for (size_t j = 0; j < last_dim; ++j) row_out[j] /= sum;
+        // Each row does O(last_dim) work — parallelize over rows.
+        parallel_for(num_rows, 1, [=](size_t start_row, size_t end_row) {
+            for (size_t i = start_row; i < end_row; ++i) {
+                const float* row_in = in_ptr + i * last_dim;
+                float* row_out = out_ptr + i * last_dim;
+
+                // Pass 1: NEON-accelerated max reduction.
+                float max_val = -std::numeric_limits<float>::infinity();
+                size_t j = 0;
+                if (last_dim >= 4) {
+                    float32x4_t vmax = vld1q_f32(row_in);
+                    j = 4;
+                    for (; j + 3 < last_dim; j += 4)
+                        vmax = vmaxq_f32(vmax, vld1q_f32(row_in + j));
+                    max_val = vmaxvq_f32(vmax);
                 }
-                std::lock_guard<std::mutex> lock(mtx);
-                if (++tasks_completed == actual_tasks) cv.notify_one();
-            });
-        }
-        std::unique_lock<std::mutex> lock(mtx);
-        cv.wait(lock, [&] { return tasks_completed == actual_tasks; });
+                for (; j < last_dim; ++j) max_val = std::max(max_val, row_in[j]);
+
+                // Pass 2: exp + sum (scalar — no NEON exp on this platform).
+                float sum = 0.0f;
+                for (j = 0; j < last_dim; ++j) {
+                    row_out[j] = std::exp(row_in[j] - max_val);
+                    sum += row_out[j];
+                }
+
+                // Pass 3: NEON-accelerated normalization.
+                const float32x4_t vinv = vdupq_n_f32(1.0f / sum);
+                j = 0;
+                for (; j + 3 < last_dim; j += 4)
+                    vst1q_f32(row_out + j, vmulq_f32(vld1q_f32(row_out + j), vinv));
+                for (; j < last_dim; ++j) row_out[j] /= sum;
+            }
+        });
     }
 
     void LayerNorm(const Tensor& in, Tensor& out) {
@@ -482,41 +451,56 @@ namespace kern::ops {
         float* __restrict out_ptr = static_cast<float*>(out.data());
         const float eps = 1e-5f;
 
-        unsigned int num_threads = std::thread::hardware_concurrency();
-        if (num_threads == 0) num_threads = 2;
-        std::condition_variable cv; std::mutex mtx; size_t tasks_completed = 0;
-        size_t rows_per_thread = (num_rows + num_threads - 1) / num_threads;
-        unsigned int actual_tasks = 0;
-        for (unsigned int t = 0; t < num_threads; ++t) {
-            size_t start_row = t * rows_per_thread;
-            size_t end_row = std::min(start_row + rows_per_thread, num_rows);
-            if (start_row >= end_row) break;
-            actual_tasks++;
-        }
-        for (unsigned int t = 0; t < actual_tasks; ++t) {
-            size_t start_row = t * rows_per_thread;
-            size_t end_row = std::min(start_row + rows_per_thread, num_rows);
-            GetThreadPool().enqueue([=, &tasks_completed, &cv, &mtx]() {
-                for (size_t i = start_row; i < end_row; ++i) {
-                    const float* row_in = in_ptr + i * last_dim;
-                    float* row_out = out_ptr + i * last_dim;
-                    float mean = 0.0f;
-                    for (size_t j = 0; j < last_dim; ++j) mean += row_in[j];
-                    mean /= static_cast<float>(last_dim);
-                    float var = 0.0f;
-                    for (size_t j = 0; j < last_dim; ++j) {
-                        const float diff = row_in[j] - mean;
-                        var += diff * diff;
-                    }
-                    var /= static_cast<float>(last_dim);
-                    const float inv_std = 1.0f / std::sqrt(var + eps);
-                    for (size_t j = 0; j < last_dim; ++j) row_out[j] = (row_in[j] - mean) * inv_std;
+        // Each row does O(last_dim) work — parallelize over rows.
+        parallel_for(num_rows, 1, [=](size_t start_row, size_t end_row) {
+            for (size_t i = start_row; i < end_row; ++i) {
+                const float* row_in = in_ptr + i * last_dim;
+                float* row_out = out_ptr + i * last_dim;
+
+                // Pass 1: NEON-accelerated mean.
+                float sum = 0.0f;
+                size_t j = 0;
+                if (last_dim >= 4) {
+                    float32x4_t vsum = vdupq_n_f32(0.0f);
+                    for (; j + 3 < last_dim; j += 4)
+                        vsum = vaddq_f32(vsum, vld1q_f32(row_in + j));
+                    sum = vaddvq_f32(vsum);
                 }
-                std::lock_guard<std::mutex> lock(mtx);
-                if (++tasks_completed == actual_tasks) cv.notify_one();
-            });
-        }
-        std::unique_lock<std::mutex> lock(mtx);
-        cv.wait(lock, [&] { return tasks_completed == actual_tasks; });
+                for (; j < last_dim; ++j) sum += row_in[j];
+                const float mean = sum / static_cast<float>(last_dim);
+
+                // Pass 2: NEON-accelerated variance.
+                const float32x4_t vmean = vdupq_n_f32(mean);
+                float var = 0.0f;
+                j = 0;
+                if (last_dim >= 4) {
+                    float32x4_t vvar = vdupq_n_f32(0.0f);
+                    for (; j + 3 < last_dim; j += 4) {
+                        const float32x4_t d = vsubq_f32(vld1q_f32(row_in + j), vmean);
+                        vvar = vfmaq_f32(vvar, d, d);
+                    }
+                    var = vaddvq_f32(vvar);
+                }
+                for (; j < last_dim; ++j) {
+                    const float diff = row_in[j] - mean;
+                    var += diff * diff;
+                }
+                var /= static_cast<float>(last_dim);
+                const float inv_std = 1.0f / std::sqrt(var + eps);
+
+                // Pass 3: NEON-accelerated normalization.
+                const float32x4_t vinv_std = vdupq_n_f32(inv_std);
+                j = 0;
+                if (last_dim >= 4) {
+                    for (; j + 3 < last_dim; j += 4) {
+                        const float32x4_t v = vsubq_f32(vld1q_f32(row_in + j), vmean);
+                        vst1q_f32(row_out + j, vmulq_f32(v, vinv_std));
+                    }
+                }
+                for (; j < last_dim; ++j)
+                    row_out[j] = (row_in[j] - mean) * inv_std;
+            }
+        });
     }
+
 } // namespace kern::ops

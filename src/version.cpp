@@ -2,7 +2,7 @@
 // Created by Ivan Maieli on 13/08/2026.
 //
 
-#include "kern/version.hpp"
+#include <kern/version.hpp>
 #include <string_view>
 
 namespace kern {
