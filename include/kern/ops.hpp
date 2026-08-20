@@ -15,6 +15,10 @@ namespace kern::ops {
     void Permute(const Tensor& in, const std::vector<std::size_t>& order, Tensor& out);
     void MatMul(const Tensor& a, const Tensor& b, Tensor& out);
     void MatMulTransposed(const Tensor& a, const Tensor& b_t, Tensor& out);
+    // out[M] = A[M,K] . v[K]. With M == 1 this is the decode-path GEMV; the
+    // K axis is split across threads when there are too few rows to fill the
+    // pool. float32 and float16 are supported.
+    void MatVec(const Tensor& a, const Tensor& v, Tensor& out);
     void ReLU(const Tensor& in, Tensor& out);
     void GELU(const Tensor& in, Tensor& out);
     void Softmax(const Tensor& in, Tensor& out);

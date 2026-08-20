@@ -5,10 +5,10 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <arm_neon.h>
 #include <thread>
 #include <latch>
-#include <cstring>
 
 namespace kern::ops {
 
@@ -69,6 +69,296 @@ namespace kern::ops {
         done.wait();
     }
 
+    // ------------------------------------------------------------------
+    // Dtype traits: one vector loop body, two storage formats.
+    //
+    // float16 tensors store weights at half the memory footprint (the win:
+    // every kernel here is bandwidth-bound at least partially), but the
+    // arithmetic always runs in float32 lanes. Loading converts f16 -> f32,
+    // storing converts back, so accumulation precision is identical to the
+    // float32 kernels and only the storage changes.
+    // ------------------------------------------------------------------
+    struct F32Traits {
+        using T = float;
+        static float32x4_t load4(const T* p) { return vld1q_f32(p); }
+        static void store4(T* p, float32x4_t v) { vst1q_f32(p, v); }
+        static float load1(const T* p) { return *p; }
+        static void store1(T* p, float v) { *p = v; }
+    };
+
+    struct F16Traits {
+        using T = __fp16;
+        static float32x4_t load4(const T* p) { return vcvt_f32_f16(vld1_f16(p)); }
+        static void store4(T* p, float32x4_t v) { vst1_f16(p, vcvt_f16_f32(v)); }
+        static float load1(const T* p) { return static_cast<float>(*p); }
+        static void store1(T* p, float v) { *p = static_cast<__fp16>(v); }
+    };
+
+    template <typename Tr>
+    static float dot_range(const typename Tr::T* x, const typename Tr::T* y, size_t n) {
+        float32x4_t acc = vdupq_n_f32(0.0f);
+        size_t k = 0;
+        for (; k + 3 < n; k += 4)
+            acc = vfmaq_f32(acc, Tr::load4(x + k), Tr::load4(y + k));
+        float sum = vaddvq_f32(acc);
+        for (; k < n; ++k) sum += Tr::load1(x + k) * Tr::load1(y + k);
+        return sum;
+    }
+
+    // Element-wise a+b over a flat range. In-order processing reads each
+    // element before writing it, so out aliasing a or b is safe.
+    template <typename Tr>
+    static void add_flat(const typename Tr::T* a, const typename Tr::T* b,
+                         typename Tr::T* out, size_t n) {
+        size_t i = 0;
+        for (; i + 3 < n; i += 4)
+            Tr::store4(out + i, vaddq_f32(Tr::load4(a + i), Tr::load4(b + i)));
+        for (; i < n; ++i) Tr::store1(out + i, Tr::load1(a + i) + Tr::load1(b + i));
+    }
+
+    template <typename Tr>
+    static void relu_range(const typename Tr::T* in, typename Tr::T* out,
+                           size_t start, size_t end) {
+        const float32x4_t vzero = vdupq_n_f32(0.0f);
+        size_t i = start;
+        for (; i + 3 < end; i += 4)
+            Tr::store4(out + i, vmaxq_f32(Tr::load4(in + i), vzero));
+        for (; i < end; ++i) Tr::store1(out + i, std::max(0.0f, Tr::load1(in + i)));
+    }
+
+    // Vector tanh for GELU: a [5/4] Pade approximant evaluated at y/4 (it
+    // matches tanh's series through y^5), then two applications of the
+    // double-angle identity tanh(2t) = 2t / (1 + t^2). Clamping the rational
+    // result makes large arguments saturate to +/-1 exactly, which the
+    // double-angle maps to +/-1 while compressing the error near the boundary.
+    static float32x4_t neon_tanh(float32x4_t y) {
+        const float32x4_t y4 = vmulq_n_f32(y, 0.25f);
+        const float32x4_t y2 = vmulq_f32(y4, y4);
+        // r = y4 * (y4^4 + 105*y4^2 + 945) / (15*y4^4 + 420*y4^2 + 945)
+        const float32x4_t num = vfmaq_f32(vdupq_n_f32(945.0f), vaddq_f32(y2, vdupq_n_f32(105.0f)), y2);
+        const float32x4_t den = vfmaq_f32(vdupq_n_f32(945.0f), y2,
+                                          vfmaq_n_f32(vdupq_n_f32(420.0f), y2, 15.0f));
+        const float32x4_t unit = vdupq_n_f32(1.0f);
+        const float32x4_t r = vminq_f32(vmaxq_f32(vdivq_f32(vmulq_f32(y4, num), den), vdupq_n_f32(-1.0f)), unit);
+        float32x4_t t = vdivq_f32(vaddq_f32(r, r), vfmaq_f32(unit, r, r));
+        t = vdivq_f32(vaddq_f32(t, t), vfmaq_f32(unit, t, t));
+        return t;
+    }
+
+    template <typename Tr>
+    static void gelu_range(const typename Tr::T* in, typename Tr::T* out,
+                           size_t start, size_t end) {
+        const float k1 = 0.7978845608f;
+        const float k2 = 0.044715f;
+        const float k13 = k1 * k2; // x * (k1 + k13*x^2) == k1 * (x + k2*x^3)
+        size_t i = start;
+        for (; i + 3 < end; i += 4) {
+            const float32x4_t vx = Tr::load4(in + i);
+            const float32x4_t vx2 = vmulq_f32(vx, vx);
+            const float32x4_t vu = vmulq_f32(vx, vfmaq_f32(vdupq_n_f32(k1), vx2, vdupq_n_f32(k13)));
+            const float32x4_t vt = neon_tanh(vu);
+            const float32x4_t vres = vmulq_f32(vx, vaddq_f32(vdupq_n_f32(1.0f), vt));
+            Tr::store4(out + i, vmulq_n_f32(vres, 0.5f));
+        }
+        for (; i < end; ++i) {
+            const float x = Tr::load1(in + i);
+            Tr::store1(out + i, 0.5f * x * (1.0f + std::tanh(k1 * (x + k2 * x * x * x))));
+        }
+    }
+
+    template <typename Tr>
+    static void softmax_rows(const typename Tr::T* in, typename Tr::T* out,
+                             size_t last_dim, size_t r0, size_t r1) {
+        for (size_t i = r0; i < r1; ++i) {
+            const typename Tr::T* row_in = in + i * last_dim;
+            typename Tr::T* row_out = out + i * last_dim;
+
+            // Pass 1: NEON max reduction.
+            float max_val = -std::numeric_limits<float>::infinity();
+            size_t j = 0;
+            if (last_dim >= 4) {
+                float32x4_t vmax = Tr::load4(row_in);
+                j = 4;
+                for (; j + 3 < last_dim; j += 4)
+                    vmax = vmaxq_f32(vmax, Tr::load4(row_in + j));
+                max_val = vmaxvq_f32(vmax);
+            }
+            for (; j < last_dim; ++j) max_val = std::max(max_val, Tr::load1(row_in + j));
+
+            // Pass 2: exp + sum (scalar: no NEON exp on this platform).
+            float sum = 0.0f;
+            for (j = 0; j < last_dim; ++j) {
+                const float e = std::exp(Tr::load1(row_in + j) - max_val);
+                Tr::store1(row_out + j, e);
+                sum += e;
+            }
+
+            // Pass 3: NEON normalization by reciprocal product.
+            const float32x4_t vinv = vdupq_n_f32(1.0f / sum);
+            j = 0;
+            for (; j + 3 < last_dim; ++j += 4)
+                Tr::store4(row_out + j, vmulq_f32(Tr::load4(row_out + j), vinv));
+            for (; j < last_dim; ++j)
+                Tr::store1(row_out + j, Tr::load1(row_out + j) / sum);
+        }
+    }
+
+    template <typename Tr>
+    static void layernorm_rows(const typename Tr::T* in, typename Tr::T* out,
+                               size_t last_dim, size_t r0, size_t r1) {
+        constexpr float eps = 1e-5f;
+        for (size_t i = r0; i < r1; ++i) {
+            const typename Tr::T* row_in = in + i * last_dim;
+            typename Tr::T* row_out = out + i * last_dim;
+
+            // Pass 1: NEON mean.
+            float sum = 0.0f;
+            size_t j = 0;
+            if (last_dim >= 4) {
+                float32x4_t vsum = vdupq_n_f32(0.0f);
+                for (; j + 3 < last_dim; j += 4)
+                    vsum = vaddq_f32(vsum, Tr::load4(row_in + j));
+                sum = vaddvq_f32(vsum);
+            }
+            for (; j < last_dim; ++j) sum += Tr::load1(row_in + j);
+            const float mean = sum / static_cast<float>(last_dim);
+
+            // Pass 2: NEON variance.
+            const float32x4_t vmean = vdupq_n_f32(mean);
+            float var = 0.0f;
+            j = 0;
+            if (last_dim >= 4) {
+                float32x4_t vvar = vdupq_n_f32(0.0f);
+                for (; j + 3 < last_dim; j += 4) {
+                    const float32x4_t d = vsubq_f32(Tr::load4(row_in + j), vmean);
+                    vvar = vfmaq_f32(vvar, d, d);
+                }
+                var = vaddvq_f32(vvar);
+            }
+            for (; j < last_dim; ++j) {
+                const float diff = Tr::load1(row_in + j) - mean;
+                var += diff * diff;
+            }
+            var /= static_cast<float>(last_dim);
+            const float inv_std = 1.0f / std::sqrt(var + eps);
+
+            // Pass 3: NEON normalization.
+            const float32x4_t vinv_std = vdupq_n_f32(inv_std);
+            j = 0;
+            for (; j + 3 < last_dim; j += 4)
+                Tr::store4(row_out + j, vmulq_f32(vsubq_f32(Tr::load4(row_in + j), vmean), vinv_std));
+            for (; j < last_dim; ++j)
+                Tr::store1(row_out + j, (Tr::load1(row_in + j) - mean) * inv_std);
+        }
+    }
+
+    // Tiled M-N-K matmul over a row range; the template only changes how
+    // elements are loaded/stored, all arithmetic stays in f32 registers.
+    template <typename Tr>
+    static void matmul_rows(const typename Tr::T* a_ptr, const typename Tr::T* b_ptr,
+                            typename Tr::T* out_ptr,
+                            size_t K, size_t N, size_t m_start, size_t m_end) {
+        for (size_t m_tile = m_start; m_tile < m_end; m_tile += TILE_SIZE) {
+            for (size_t n_tile = 0; n_tile < N; n_tile += TILE_SIZE) {
+                const size_t m_max = std::min(m_tile + TILE_SIZE, m_end);
+                const size_t n_max = std::min(n_tile + TILE_SIZE, N);
+
+                // Zero the output tile so the accumulation below produces
+                // correct results even when the output buffer holds stale
+                // data. +0.0 is an all-zero byte pattern for both f32 and
+                // f16, so memset is valid for both.
+                for (size_t m = m_tile; m < m_max; ++m)
+                    std::memset(out_ptr + m * N + n_tile, 0,
+                                (n_max - n_tile) * sizeof(typename Tr::T));
+
+                for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
+                    const size_t k_max = std::min(k_tile + TILE_SIZE, K);
+
+                    for (size_t m = m_tile; m < m_max; ++m) {
+                        const typename Tr::T* a_row = a_ptr + m * K;
+                        typename Tr::T* out_row = out_ptr + m * N;
+                        for (size_t k = k_tile; k < k_max; ++k) {
+                            const float a_val = Tr::load1(a_row + k);
+                            const float32x4_t va_val = vdupq_n_f32(a_val);
+                            const typename Tr::T* b_row = b_ptr + k * N;
+
+                            size_t n = n_tile;
+                            for (; n + 7 < n_max; n += 8) {
+                                float32x4_t vout1 = Tr::load4(out_row + n);
+                                vout1 = vfmaq_f32(vout1, va_val, Tr::load4(b_row + n));
+                                Tr::store4(out_row + n, vout1);
+
+                                float32x4_t vout2 = Tr::load4(out_row + n + 4);
+                                vout2 = vfmaq_f32(vout2, va_val, Tr::load4(b_row + n + 4));
+                                Tr::store4(out_row + n + 4, vout2);
+                            }
+                            for (; n < n_max; ++n)
+                                Tr::store1(out_row + n,
+                                           Tr::load1(out_row + n) + a_val * Tr::load1(b_row + n));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // out = A . B^T with B^T supplied row-major [N, K]: one dot product per
+    // output element, both operands stream with unit stride.
+    template <typename Tr>
+    static void matmul_transposed_rows(const typename Tr::T* a_ptr, const typename Tr::T* b_ptr,
+                                       typename Tr::T* out_ptr,
+                                       size_t K, size_t N, size_t m_start, size_t m_end) {
+        for (size_t m = m_start; m < m_end; ++m) {
+            const typename Tr::T* a_row = a_ptr + m * K;
+            typename Tr::T* out_row = out_ptr + m * N;
+            for (size_t n = 0; n < N; ++n)
+                Tr::store1(out_row + n, dot_range<Tr>(a_row, b_ptr + n * K, K));
+        }
+    }
+
+    // out[M] = A[M,K] . v[K]. Two parallelization strategies:
+    //  - M fills the pool: parallel over rows, each row one dot product.
+    //  - M is small (decode has M == 1): rows cannot fill the pool, so K is
+    //    split into chunks; every chunk computes partial dots into a
+    //    disjoint scratch column (no atomics), and the caller reduces.
+    template <typename Tr>
+    static void matvec_impl(const typename Tr::T* a, const typename Tr::T* v,
+                            typename Tr::T* out, size_t M, size_t K) {
+        unsigned int hw = std::thread::hardware_concurrency();
+        if (hw == 0) hw = 2;
+
+        if (M >= hw) {
+            parallel_for(M, 1, [&](size_t s, size_t e) {
+                for (size_t m = s; m < e; ++m)
+                    Tr::store1(out + m, dot_range<Tr>(a + m * K, v, K));
+            });
+            return;
+        }
+
+        const size_t max_chunks = K / kMinChunk;
+        if (max_chunks < 2) {
+            for (size_t m = 0; m < M; ++m)
+                Tr::store1(out + m, dot_range<Tr>(a + m * K, v, K));
+            return;
+        }
+
+        const size_t nchunks = std::min<size_t>(hw, max_chunks);
+        std::vector<float> partial(M * nchunks);
+        parallel_for(nchunks, 1, [&](size_t cs, size_t ce) {
+            for (size_t c = cs; c < ce; ++c) {
+                const size_t k0 = c * K / nchunks;
+                const size_t k1 = (c + 1) * K / nchunks;
+                for (size_t m = 0; m < M; ++m)
+                    partial[m * nchunks + c] = dot_range<Tr>(a + m * K + k0, v + k0, k1 - k0);
+            }
+        });
+        for (size_t m = 0; m < M; ++m) {
+            float sum = 0.0f;
+            for (size_t c = 0; c < nchunks; ++c) sum += partial[m * nchunks + c];
+            Tr::store1(out + m, sum);
+        }
+    }
+
     Shape GetBroadcastShape(const Shape& a, const Shape& b) {
         const size_t rank_a = a.rank();
         const size_t rank_b = b.rank();
@@ -102,22 +392,18 @@ namespace kern::ops {
         if (Tensor::is_aliased(b, out) && !(b.shape() == out.shape() && b.shape().is_contiguous()))
             throw std::invalid_argument("Add: in-place use requires the aliased input to match out.");
 
-        if (a.dtype() == DataType::float32 && a.shape() == b.shape() && a.shape() == out.shape() &&
-            a.shape().is_contiguous() && b.shape().is_contiguous() &&
-            !Tensor::is_aliased(a, out) && !Tensor::is_aliased(b, out)) {
-            const float* __restrict a_ptr = static_cast<const float*>(a.data());
-            const float* __restrict b_ptr = static_cast<const float*>(b.data());
-            float* __restrict out_ptr = static_cast<float*>(out.data());
-            const size_t n = out.shape().element_count();
-            size_t i = 0;
-            for (; i + 3 < n; i += 4) {
-                float32x4_t va = vld1q_f32(a_ptr + i);
-                float32x4_t vb = vld1q_f32(b_ptr + i);
-                float32x4_t vout = vaddq_f32(va, vb);
-                vst1q_f32(out_ptr + i, vout);
+        const bool same_shape = a.shape() == b.shape() && a.shape() == out.shape();
+
+        if (a.dtype() == DataType::float32) {
+            if (same_shape && a.shape().is_contiguous() && b.shape().is_contiguous()) {
+                // add_flat processes elements in order (read both, then
+                // write), so it also covers the legal in-place case.
+                add_flat<F32Traits>(static_cast<const float*>(a.data()),
+                                    static_cast<const float*>(b.data()),
+                                    static_cast<float*>(out.data()),
+                                    out.shape().element_count());
+                return;
             }
-            for (; i < n; ++i) out_ptr[i] = a_ptr[i] + b_ptr[i];
-        } else if (a.dtype() == DataType::float32) {
             const float* __restrict a_ptr = static_cast<const float*>(a.data());
             const float* __restrict b_ptr = static_cast<const float*>(b.data());
             float* __restrict out_ptr = static_cast<float*>(out.data());
@@ -130,7 +416,7 @@ namespace kern::ops {
                 return;
             }
 
-            // Stride-zero broadcasting: right-align each operand against the
+            // Stride-zero broadcasting: right align each operand against the
             // output rank and set its stride to 0 on broadcast axes. A zero
             // stride "freezes" the operand pointer on that axis, so the loops
             // below need no per-element div/mod or coordinate clamping.
@@ -167,13 +453,7 @@ namespace kern::ops {
                 float* po = out_ptr + o * inner;
 
                 if (stride_a == 1 && stride_b == 1) {
-                    size_t j = 0;
-                    for (; j + 3 < inner; j += 4) {
-                        const float32x4_t va = vld1q_f32(pa + j);
-                        const float32x4_t vb = vld1q_f32(pb + j);
-                        vst1q_f32(po + j, vaddq_f32(va, vb));
-                    }
-                    for (; j < inner; ++j) po[j] = pa[j] + pb[j];
+                    add_flat<F32Traits>(pa, pb, po, inner);
                 } else {
                     for (size_t j = 0; j < inner; ++j)
                         po[j] = pa[j * stride_a] + pb[j * stride_b];
@@ -186,6 +466,13 @@ namespace kern::ops {
                     coords[dd] = 0;
                 }
             }
+        } else if (a.dtype() == DataType::float16) {
+            if (!same_shape || !a.shape().is_contiguous() || !b.shape().is_contiguous())
+                throw std::invalid_argument("Add: float16 supports same-shape contiguous tensors only.");
+            add_flat<F16Traits>(static_cast<const __fp16*>(a.data()),
+                                static_cast<const __fp16*>(b.data()),
+                                static_cast<__fp16*>(out.data()),
+                                out.shape().element_count());
         } else throw std::runtime_error("Unsupported dtype for Add operation.");
     }
 
@@ -231,56 +518,23 @@ namespace kern::ops {
         if (Tensor::is_aliased(a, out) || Tensor::is_aliased(b, out))
             throw std::invalid_argument("MatMul: output must not alias an input.");
 
+        // Each row already does O(K*N) work, so one row per task is enough
+        // to justify the dispatch overhead. Raw pointers are hoisted out of
+        // the lambdas: a by-value capture would copy the Tensor handle as
+        // const and hand back a const void*.
         if (a.dtype() == DataType::float32) {
-            const float* __restrict a_ptr = static_cast<const float*>(a.data());
-            const float* __restrict b_ptr = static_cast<const float*>(b.data());
-            float* __restrict out_ptr = static_cast<float*>(out.data());
-
-            // Each row already does O(K*N) work, so min_work = 1 is
-            // enough to justify parallel overhead.
-            parallel_for(M, 1, [=](size_t m_start, size_t m_end) {
-                // M-N-K tiling for better cache locality
-                for (size_t m_tile = m_start; m_tile < m_end; m_tile += TILE_SIZE) {
-                    for (size_t n_tile = 0; n_tile < N; n_tile += TILE_SIZE) {
-                        const size_t m_max = std::min(m_tile + TILE_SIZE, m_end);
-                        const size_t n_max = std::min(n_tile + TILE_SIZE, N);
-
-                        // Zero the output tile so the accumulation below
-                        // produces correct results even when the output buffer
-                        // holds stale data from a previous call.
-                        for (size_t m = m_tile; m < m_max; ++m)
-                            std::memset(out_ptr + m * N + n_tile, 0,
-                                        (n_max - n_tile) * sizeof(float));
-
-                        for (size_t k_tile = 0; k_tile < K; k_tile += TILE_SIZE) {
-                            const size_t k_max = std::min(k_tile + TILE_SIZE, K);
-
-                            for (size_t m = m_tile; m < m_max; ++m) {
-                                const float* a_row = a_ptr + m * K;
-                                float* out_row = out_ptr + m * N;
-                                for (size_t k = k_tile; k < k_max; ++k) {
-                                    const float a_val = a_row[k];
-                                    const float32x4_t va_val = vdupq_n_f32(a_val);
-                                    const float* b_row = b_ptr + k * N;
-
-                                    size_t n = n_tile;
-                                    for (; n + 7 < n_max; n += 8) {
-                                        float32x4_t vb1 = vld1q_f32(b_row + n);
-                                        float32x4_t vout1 = vld1q_f32(out_row + n);
-                                        vout1 = vfmaq_f32(vout1, va_val, vb1);
-                                        vst1q_f32(out_row + n, vout1);
-
-                                        float32x4_t vb2 = vld1q_f32(b_row + n + 4);
-                                        float32x4_t vout2 = vld1q_f32(out_row + n + 4);
-                                        vout2 = vfmaq_f32(vout2, va_val, vb2);
-                                        vst1q_f32(out_row + n + 4, vout2);
-                                    }
-                                    for (; n < n_max; ++n) out_row[n] += a_val * b_row[n];
-                                }
-                            }
-                        }
-                    }
-                }
+            const float* a_ptr = static_cast<const float*>(a.data());
+            const float* b_ptr = static_cast<const float*>(b.data());
+            float* out_ptr = static_cast<float*>(out.data());
+            parallel_for(M, 1, [=](size_t s, size_t e) {
+                matmul_rows<F32Traits>(a_ptr, b_ptr, out_ptr, K, N, s, e);
+            });
+        } else if (a.dtype() == DataType::float16) {
+            const __fp16* a_ptr = static_cast<const __fp16*>(a.data());
+            const __fp16* b_ptr = static_cast<const __fp16*>(b.data());
+            __fp16* out_ptr = static_cast<__fp16*>(out.data());
+            parallel_for(M, 1, [=](size_t s, size_t e) {
+                matmul_rows<F16Traits>(a_ptr, b_ptr, out_ptr, K, N, s, e);
             });
         } else throw std::runtime_error("Unsupported dtype for MatMul operation.");
     }
@@ -302,205 +556,131 @@ namespace kern::ops {
             throw std::invalid_argument("MatMulTransposed: output must not alias an input.");
 
         if (a.dtype() == DataType::float32) {
-            const float* __restrict a_ptr = static_cast<const float*>(a.data());
-            const float* __restrict b_ptr = static_cast<const float*>(b_t.data());
-            float* __restrict out_ptr = static_cast<float*>(out.data());
-
-            // Each row does O(K*N) work — min_work = 1.
-            parallel_for(M, 1, [=](size_t m_start, size_t m_end) {
-                // Contiguity is guaranteed by the guards above, so plain
-                // row pointers replace the per-access linear_index calls.
-                for (size_t m = m_start; m < m_end; ++m) {
-                    const float* a_row = a_ptr + m * K;
-                    float* out_row = out_ptr + m * N;
-                    for (size_t n = 0; n < N; ++n) {
-                        const float* b_row = b_ptr + n * K;
-                        float32x4_t acc = vdupq_n_f32(0.0f);
-                        size_t k = 0;
-                        for (; k + 3 < K; k += 4)
-                            acc = vfmaq_f32(acc, vld1q_f32(a_row + k), vld1q_f32(b_row + k));
-                        float sum = vaddvq_f32(acc);
-                        for (; k < K; ++k) sum += a_row[k] * b_row[k];
-                        out_row[n] = sum;
-                    }
-                }
+            const float* a_ptr = static_cast<const float*>(a.data());
+            const float* b_ptr = static_cast<const float*>(b_t.data());
+            float* out_ptr = static_cast<float*>(out.data());
+            parallel_for(M, 1, [=](size_t s, size_t e) {
+                matmul_transposed_rows<F32Traits>(a_ptr, b_ptr, out_ptr, K, N, s, e);
+            });
+        } else if (a.dtype() == DataType::float16) {
+            const __fp16* a_ptr = static_cast<const __fp16*>(a.data());
+            const __fp16* b_ptr = static_cast<const __fp16*>(b_t.data());
+            __fp16* out_ptr = static_cast<__fp16*>(out.data());
+            parallel_for(M, 1, [=](size_t s, size_t e) {
+                matmul_transposed_rows<F16Traits>(a_ptr, b_ptr, out_ptr, K, N, s, e);
             });
         } else throw std::runtime_error("Unsupported dtype for MatMulTransposed operation.");
+    }
+
+    void MatVec(const Tensor& a, const Tensor& v, Tensor& out) {
+        if (a.shape().rank() != 2 || v.shape().rank() != 1 || out.shape().rank() != 1)
+            throw std::invalid_argument("MatVec: expected a 2D matrix, a 1D vector and a 1D output.");
+        const size_t M = a.shape().dimension(0);
+        const size_t K = a.shape().dimension(1);
+        if (v.shape().dimension(0) != K)
+            throw std::invalid_argument("MatVec: Inner dimensions must match.");
+        if (out.shape().dimension(0) != M)
+            throw std::invalid_argument("MatVec: Output shape is incompatible.");
+        require_contiguous(a, "MatVec");
+        require_contiguous(v, "MatVec");
+        require_contiguous(out, "MatVec");
+        if (Tensor::is_aliased(a, out) || Tensor::is_aliased(v, out))
+            throw std::invalid_argument("MatVec: output must not alias an input.");
+
+        if (a.dtype() == DataType::float32) {
+            matvec_impl<F32Traits>(static_cast<const float*>(a.data()),
+                                   static_cast<const float*>(v.data()),
+                                   static_cast<float*>(out.data()), M, K);
+        } else if (a.dtype() == DataType::float16) {
+            matvec_impl<F16Traits>(static_cast<const __fp16*>(a.data()),
+                                   static_cast<const __fp16*>(v.data()),
+                                   static_cast<__fp16*>(out.data()), M, K);
+        } else throw std::runtime_error("Unsupported dtype for MatVec operation.");
     }
 
     void ReLU(const Tensor& in, Tensor& out) {
         if (!(in.shape() == out.shape())) throw std::invalid_argument("ReLU: Shapes must match.");
         require_contiguous(in, "ReLU");
         require_contiguous(out, "ReLU");
-        if (in.dtype() == DataType::float32 && out.dtype() == DataType::float32) {
-            const float* __restrict in_ptr = static_cast<const float*>(in.data());
-            float* __restrict out_ptr = static_cast<float*>(out.data());
-            const size_t n = in.shape().element_count();
-            parallel_for(n, kMinChunk, [=](size_t start, size_t end) {
-                const float32x4_t vzero = vdupq_n_f32(0.0f);
-                size_t i = start;
-                for (; i + 3 < end; i += 4)
-                    vst1q_f32(out_ptr + i, vmaxq_f32(vld1q_f32(in_ptr + i), vzero));
-                for (; i < end; ++i) out_ptr[i] = std::max(0.0f, in_ptr[i]);
+        const size_t n = in.shape().element_count();
+        if (in.dtype() == DataType::float32) {
+            const float* in_ptr = static_cast<const float*>(in.data());
+            float* out_ptr = static_cast<float*>(out.data());
+            parallel_for(n, kMinChunk, [=](size_t s, size_t e) {
+                relu_range<F32Traits>(in_ptr, out_ptr, s, e);
+            });
+        } else if (in.dtype() == DataType::float16) {
+            const __fp16* in_ptr = static_cast<const __fp16*>(in.data());
+            __fp16* out_ptr = static_cast<__fp16*>(out.data());
+            parallel_for(n, kMinChunk, [=](size_t s, size_t e) {
+                relu_range<F16Traits>(in_ptr, out_ptr, s, e);
             });
         } else throw std::runtime_error("Unsupported dtype for ReLU operation.");
-    }
-
-    // Vector tanh for GELU: a [5/4] Pade approximant evaluated at y/4 (it
-    // matches tanh's series through y^5), then two applications of the
-    // double-angle identity tanh(2t) = 2t / (1 + t^2). Clamping the rational
-    // result makes large arguments saturate to +/-1 exactly, which the
-    // double-angle maps to +/-1 while compressing the error near the boundary.
-    static float32x4_t neon_tanh(float32x4_t y) {
-        const float32x4_t y4 = vmulq_n_f32(y, 0.25f);
-        const float32x4_t y2 = vmulq_f32(y4, y4);
-        // r = y4 * (y4^4 + 105*y4^2 + 945) / (15*y4^4 + 420*y4^2 + 945)
-        const float32x4_t num = vfmaq_f32(vdupq_n_f32(945.0f), vaddq_f32(y2, vdupq_n_f32(105.0f)), y2);
-        const float32x4_t den = vfmaq_f32(vdupq_n_f32(945.0f), y2, vfmaq_n_f32(vdupq_n_f32(420.0f), y2, 15.0f));
-        const float32x4_t unit = vdupq_n_f32(1.0f);
-        const float32x4_t r = vminq_f32(vmaxq_f32(vdivq_f32(vmulq_f32(y4, num), den), vdupq_n_f32(-1.0f)), unit);
-        float32x4_t t = vdivq_f32(vaddq_f32(r, r), vfmaq_f32(unit, r, r));
-        t = vdivq_f32(vaddq_f32(t, t), vfmaq_f32(unit, t, t));
-        return t;
     }
 
     void GELU(const Tensor& in, Tensor& out) {
         if (!(in.shape() == out.shape())) throw std::invalid_argument("GELU: Shapes must match.");
         require_contiguous(in, "GELU");
         require_contiguous(out, "GELU");
-        if (in.dtype() == DataType::float32 && out.dtype() == DataType::float32) {
-            const float* __restrict in_ptr = static_cast<const float*>(in.data());
-            float* __restrict out_ptr = static_cast<float*>(out.data());
-            const size_t n = in.shape().element_count();
-            parallel_for(n, kMinChunk, [=](size_t start, size_t end) {
-                const float k1 = 0.7978845608f;
-                const float k2 = 0.044715f;
-                const float k13 = k1 * k2; // x * (k1 + k13*x^2) == k1 * (x + k2*x^3)
-                size_t i = start;
-                for (; i + 3 < end; i += 4) {
-                    const float32x4_t vx = vld1q_f32(in_ptr + i);
-                    const float32x4_t vx2 = vmulq_f32(vx, vx);
-                    const float32x4_t vu = vmulq_f32(vx, vfmaq_f32(vdupq_n_f32(k1), vx2, vdupq_n_f32(k13)));
-                    const float32x4_t vt = neon_tanh(vu);
-                    const float32x4_t vres = vmulq_f32(vx, vaddq_f32(vdupq_n_f32(1.0f), vt));
-                    vst1q_f32(out_ptr + i, vmulq_n_f32(vres, 0.5f));
-                }
-                for (; i < end; ++i) {
-                    const float x = in_ptr[i];
-                    out_ptr[i] = 0.5f * x * (1.0f + std::tanh(k1 * (x + k2 * x * x * x)));
-                }
+        const size_t n = in.shape().element_count();
+        if (in.dtype() == DataType::float32) {
+            const float* in_ptr = static_cast<const float*>(in.data());
+            float* out_ptr = static_cast<float*>(out.data());
+            parallel_for(n, kMinChunk, [=](size_t s, size_t e) {
+                gelu_range<F32Traits>(in_ptr, out_ptr, s, e);
+            });
+        } else if (in.dtype() == DataType::float16) {
+            const __fp16* in_ptr = static_cast<const __fp16*>(in.data());
+            __fp16* out_ptr = static_cast<__fp16*>(out.data());
+            parallel_for(n, kMinChunk, [=](size_t s, size_t e) {
+                gelu_range<F16Traits>(in_ptr, out_ptr, s, e);
             });
         } else throw std::runtime_error("Unsupported dtype for GELU operation.");
     }
 
     void Softmax(const Tensor& in, Tensor& out) {
         if (!(in.shape() == out.shape())) throw std::invalid_argument("Softmax: Shapes must match.");
-        if (in.dtype() != DataType::float32 || out.dtype() != DataType::float32)
-            throw std::runtime_error("Unsupported dtype for Softmax operation.");
         require_contiguous(in, "Softmax");
         require_contiguous(out, "Softmax");
         const size_t last_dim = in.shape().dimension(in.shape().rank() - 1);
         const size_t num_rows = in.shape().element_count() / last_dim;
-        const float* __restrict in_ptr = static_cast<const float*>(in.data());
-        float* __restrict out_ptr = static_cast<float*>(out.data());
 
         // Each row does O(last_dim) work — parallelize over rows.
-        parallel_for(num_rows, 1, [=](size_t start_row, size_t end_row) {
-            for (size_t i = start_row; i < end_row; ++i) {
-                const float* row_in = in_ptr + i * last_dim;
-                float* row_out = out_ptr + i * last_dim;
-
-                // Pass 1: NEON-accelerated max reduction.
-                float max_val = -std::numeric_limits<float>::infinity();
-                size_t j = 0;
-                if (last_dim >= 4) {
-                    float32x4_t vmax = vld1q_f32(row_in);
-                    j = 4;
-                    for (; j + 3 < last_dim; j += 4)
-                        vmax = vmaxq_f32(vmax, vld1q_f32(row_in + j));
-                    max_val = vmaxvq_f32(vmax);
-                }
-                for (; j < last_dim; ++j) max_val = std::max(max_val, row_in[j]);
-
-                // Pass 2: exp + sum (scalar — no NEON exp on this platform).
-                float sum = 0.0f;
-                for (j = 0; j < last_dim; ++j) {
-                    row_out[j] = std::exp(row_in[j] - max_val);
-                    sum += row_out[j];
-                }
-
-                // Pass 3: NEON-accelerated normalization.
-                const float32x4_t vinv = vdupq_n_f32(1.0f / sum);
-                j = 0;
-                for (; j + 3 < last_dim; j += 4)
-                    vst1q_f32(row_out + j, vmulq_f32(vld1q_f32(row_out + j), vinv));
-                for (; j < last_dim; ++j) row_out[j] /= sum;
-            }
-        });
+        if (in.dtype() == DataType::float32) {
+            const float* in_ptr = static_cast<const float*>(in.data());
+            float* out_ptr = static_cast<float*>(out.data());
+            parallel_for(num_rows, 1, [=](size_t s, size_t e) {
+                softmax_rows<F32Traits>(in_ptr, out_ptr, last_dim, s, e);
+            });
+        } else if (in.dtype() == DataType::float16) {
+            const __fp16* in_ptr = static_cast<const __fp16*>(in.data());
+            __fp16* out_ptr = static_cast<__fp16*>(out.data());
+            parallel_for(num_rows, 1, [=](size_t s, size_t e) {
+                softmax_rows<F16Traits>(in_ptr, out_ptr, last_dim, s, e);
+            });
+        } else throw std::runtime_error("Unsupported dtype for Softmax operation.");
     }
 
     void LayerNorm(const Tensor& in, Tensor& out) {
         if (!(in.shape() == out.shape())) throw std::invalid_argument("LayerNorm: Shapes must match.");
-        if (in.dtype() != DataType::float32 || out.dtype() != DataType::float32)
-            throw std::runtime_error("Unsupported dtype for LayerNorm operation.");
         require_contiguous(in, "LayerNorm");
         require_contiguous(out, "LayerNorm");
         const size_t last_dim = in.shape().dimension(in.shape().rank() - 1);
         const size_t num_rows = in.shape().element_count() / last_dim;
-        const float* __restrict in_ptr = static_cast<const float*>(in.data());
-        float* __restrict out_ptr = static_cast<float*>(out.data());
-        const float eps = 1e-5f;
 
-        // Each row does O(last_dim) work — parallelize over rows.
-        parallel_for(num_rows, 1, [=](size_t start_row, size_t end_row) {
-            for (size_t i = start_row; i < end_row; ++i) {
-                const float* row_in = in_ptr + i * last_dim;
-                float* row_out = out_ptr + i * last_dim;
-
-                // Pass 1: NEON-accelerated mean.
-                float sum = 0.0f;
-                size_t j = 0;
-                if (last_dim >= 4) {
-                    float32x4_t vsum = vdupq_n_f32(0.0f);
-                    for (; j + 3 < last_dim; j += 4)
-                        vsum = vaddq_f32(vsum, vld1q_f32(row_in + j));
-                    sum = vaddvq_f32(vsum);
-                }
-                for (; j < last_dim; ++j) sum += row_in[j];
-                const float mean = sum / static_cast<float>(last_dim);
-
-                // Pass 2: NEON-accelerated variance.
-                const float32x4_t vmean = vdupq_n_f32(mean);
-                float var = 0.0f;
-                j = 0;
-                if (last_dim >= 4) {
-                    float32x4_t vvar = vdupq_n_f32(0.0f);
-                    for (; j + 3 < last_dim; j += 4) {
-                        const float32x4_t d = vsubq_f32(vld1q_f32(row_in + j), vmean);
-                        vvar = vfmaq_f32(vvar, d, d);
-                    }
-                    var = vaddvq_f32(vvar);
-                }
-                for (; j < last_dim; ++j) {
-                    const float diff = row_in[j] - mean;
-                    var += diff * diff;
-                }
-                var /= static_cast<float>(last_dim);
-                const float inv_std = 1.0f / std::sqrt(var + eps);
-
-                // Pass 3: NEON-accelerated normalization.
-                const float32x4_t vinv_std = vdupq_n_f32(inv_std);
-                j = 0;
-                if (last_dim >= 4) {
-                    for (; j + 3 < last_dim; j += 4) {
-                        const float32x4_t v = vsubq_f32(vld1q_f32(row_in + j), vmean);
-                        vst1q_f32(row_out + j, vmulq_f32(v, vinv_std));
-                    }
-                }
-                for (; j < last_dim; ++j)
-                    row_out[j] = (row_in[j] - mean) * inv_std;
-            }
-        });
+        if (in.dtype() == DataType::float32) {
+            const float* in_ptr = static_cast<const float*>(in.data());
+            float* out_ptr = static_cast<float*>(out.data());
+            parallel_for(num_rows, 1, [=](size_t s, size_t e) {
+                layernorm_rows<F32Traits>(in_ptr, out_ptr, last_dim, s, e);
+            });
+        } else if (in.dtype() == DataType::float16) {
+            const __fp16* in_ptr = static_cast<const __fp16*>(in.data());
+            __fp16* out_ptr = static_cast<__fp16*>(out.data());
+            parallel_for(num_rows, 1, [=](size_t s, size_t e) {
+                layernorm_rows<F16Traits>(in_ptr, out_ptr, last_dim, s, e);
+            });
+        } else throw std::runtime_error("Unsupported dtype for LayerNorm operation.");
     }
 
 } // namespace kern::ops

@@ -29,6 +29,8 @@ add_library(kern
         src/ops.cpp
         include/kern/thread_pool.hpp
         src/thread_pool.cpp
+        include/kern/graph.hpp
+        src/graph.cpp
 )
 
 add_library(kern::kern ALIAS kern)
@@ -78,6 +80,8 @@ if(KERN_BUILD_TESTS)
             tests/tensor_test.cpp
             tests/memory_pool_test.cpp
             tests/ops_test.cpp
+            tests/fp16_test.cpp
+            tests/graph_test.cpp
             tests/bench_test.cpp
     )
     target_link_libraries(

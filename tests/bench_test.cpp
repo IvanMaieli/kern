@@ -88,3 +88,72 @@ void test_bench_gelu() {
 
     std::printf("GELU %zux%zu took: %.3f ms/iter\n", R, C, duration.count() / iters);
 }
+
+void test_bench_matvec() {
+    // Decode-path GEMV: many output features, one (or few) token rows.
+    constexpr size_t M = 4096;
+    constexpr size_t K = 4096;
+
+    kern::Tensor t_a(kern::Shape{M, K}, kern::DataType::float32);
+    kern::Tensor t_v(kern::Shape{K}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{M}, kern::DataType::float32);
+
+    kern::ops::MatVec(t_a, t_v, t_out); // warm-up
+
+    const auto start = std::chrono::high_resolution_clock::now();
+    constexpr int iters = 20;
+    for (int it = 0; it < iters; ++it) kern::ops::MatVec(t_a, t_v, t_out);
+    const auto end = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double, std::milli> duration = end - start;
+
+    std::printf("MatVec [%zux%zu].[%zu] took: %.3f ms/iter\n", M, K, K, duration.count() / iters);
+}
+
+void test_bench_matvec_f16() {
+    constexpr size_t M = 4096;
+    constexpr size_t K = 4096;
+
+    kern::Tensor t_a(kern::Shape{M, K}, kern::DataType::float16);
+    kern::Tensor t_v(kern::Shape{K}, kern::DataType::float16);
+    kern::Tensor t_out(kern::Shape{M}, kern::DataType::float16);
+
+    auto* a_ptr = static_cast<__fp16*>(t_a.data());
+    auto* v_ptr = static_cast<__fp16*>(t_v.data());
+    for (size_t i = 0; i < M * K; ++i) a_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>(i % 512) - 0.25f);
+    for (size_t i = 0; i < K; ++i) v_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>(i % 512) - 0.25f);
+
+    kern::ops::MatVec(t_a, t_v, t_out); // warm-up
+
+    const auto start = std::chrono::high_resolution_clock::now();
+    constexpr int iters = 20;
+    for (int it = 0; it < iters; ++it) kern::ops::MatVec(t_a, t_v, t_out);
+    const auto end = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double, std::milli> duration = end - start;
+
+    std::printf("MatVec f16 [%zux%zu].[%zu] took: %.3f ms/iter\n", M, K, K, duration.count() / iters);
+}
+
+void test_bench_matmultransposed_f16() {
+    constexpr size_t N = 512;
+
+    kern::Tensor t_a(kern::Shape{N, N}, kern::DataType::float16);
+    kern::Tensor t_b_t(kern::Shape{N, N}, kern::DataType::float16);
+    kern::Tensor t_out(kern::Shape{N, N}, kern::DataType::float16);
+
+    auto* a_ptr = static_cast<__fp16*>(t_a.data());
+    auto* b_ptr = static_cast<__fp16*>(t_b_t.data());
+    for (size_t i = 0; i < N * N; ++i) {
+        a_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>(i % 512) - 0.25f);
+        b_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>((i * 7) % 512) - 0.25f);
+    }
+
+    kern::ops::MatMulTransposed(t_a, t_b_t, t_out); // warm-up
+
+    const auto start = std::chrono::high_resolution_clock::now();
+    constexpr int iters = 10;
+    for (int it = 0; it < iters; ++it) kern::ops::MatMulTransposed(t_a, t_b_t, t_out);
+    const auto end = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double, std::milli> duration = end - start;
+
+    std::printf("MatMulTransposed f16 %zux%zu took: %.3f ms/iter\n", N, N, duration.count() / iters);
+}
