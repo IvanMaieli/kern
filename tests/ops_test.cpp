@@ -275,6 +275,21 @@ void test_ops_matmul_output_reuse() {
     CHECK(out_ptr[3] == 154.0f);
 }
 
+void test_ops_matmul_zero_k() {
+    // K == 0 is an empty contraction: every output element is an empty sum
+    // (zero). The kernels must store it, not leave the stale buffer behind.
+    kern::Tensor t_a(kern::Shape{2, 0}, kern::DataType::float32);
+    kern::Tensor t_b(kern::Shape{0, 3}, kern::DataType::float32);
+    kern::Tensor t_out(kern::Shape{2, 3}, kern::DataType::float32);
+
+    auto* out_ptr = static_cast<float*>(t_out.data());
+    for (std::size_t i = 0; i < 6; ++i) out_ptr[i] = 42.0f;
+
+    kern::ops::MatMul(t_a, t_b, t_out);
+
+    for (std::size_t i = 0; i < 6; ++i) CHECK(out_ptr[i] == 0.0f);
+}
+
 void test_ops_matmul_non_contiguous_rejected() {
     const kern::Tensor t_a(kern::Shape{3, 2}, kern::DataType::float32);
     kern::Tensor t_view(kern::Shape{2, 3}, kern::DataType::float32);

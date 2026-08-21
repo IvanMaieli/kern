@@ -35,6 +35,51 @@ add_library(kern
 
 add_library(kern::kern ALIAS kern)
 
+# FEAT_FP16FML dispatch: clang predefines __ARM_FEATURE_FP16_FML for every
+# apple arm64 -mcpu (apple-m1 included), but M1/M2 do not implement it. The
+# FMLAL kernels live in the only TU compiled with the feature on
+# (kern_fmlal, -mcpu=generic+fp16fml); every other target compiles with it
+# off, so fmlal instructions cannot leak past the runtime check in ops.cpp.
+# Note: an explicit -target-feature wins over a later -mcpu, so the two flag
+# sets must never meet in the same command line. The SHELL: prefix keeps the
+# repeated -Xclang token from being de-duplicated.
+set(KERN_NO_FP16FML "SHELL:-Xclang -target-feature -Xclang -fp16fml")
+
+add_library(kern_fmlal
+        src/ops_fmlal.cpp
+        src/matmul_tiling.hpp
+)
+
+target_include_directories(
+        kern_fmlal
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_compile_features(
+        kern_fmlal
+        PRIVATE
+        cxx_std_20
+)
+
+target_compile_options(
+        kern_fmlal
+        PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wconversion
+        -Wshadow
+        -mcpu=generic+fp16fml
+)
+
+target_link_libraries(
+        kern
+        PRIVATE
+        kern_fmlal
+)
+
 target_include_directories(
         kern
         PUBLIC
@@ -55,6 +100,7 @@ target_compile_options(
         -Wpedantic
         -Wconversion
         -Wshadow
+        ${KERN_NO_FP16FML}
 )
 
 add_executable(kern-run
@@ -88,6 +134,11 @@ if(KERN_BUILD_TESTS)
             kern-tests
             PRIVATE
             kern::kern
+    )
+    target_compile_options(
+            kern-tests
+            PRIVATE
+            ${KERN_NO_FP16FML}
     )
     add_test(
             NAME kern.tests

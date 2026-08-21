@@ -2,7 +2,6 @@
 #include <kern/tensor.hpp>
 #include <kern/dtype.hpp>
 #include <kern/shape.hpp>
-#include "test_macros.hpp"
 #include "tests.hpp"
 #include <algorithm>
 #include <chrono>
@@ -24,9 +23,12 @@ static void bench_dist(const char* label, int iters, F&& fn) {
             std::chrono::duration<double, std::milli>(end - start).count();
     }
     std::sort(ms.begin(), ms.end());
-    const size_t p99i = ms.size() - 1; // min(iters-1, 99% of 30)
+    // Nearest-rank p99: floor(0.99 * n). With the sample counts used here
+    // (20-30) that is the maximum, which is honest — a true tail estimate
+    // needs more samples than the distribution has.
+    const size_t p99i = ms.size() * 99 / 100;
     std::printf("%s: median %.3f ms, p99 %.3f ms, min %.3f ms\n",
-                label, ms[ms.size() / 2], ms[p99i * 99 / 100], ms.front());
+                label, ms[ms.size() / 2], ms[p99i], ms.front());
 }
 
 void test_bench_matmul() {
@@ -120,8 +122,6 @@ void test_bench_matvec_f16() {
     for (size_t i = 0; i < M * K; ++i) a_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>(i % 512) - 0.25f);
     for (size_t i = 0; i < K; ++i) v_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>(i % 512) - 0.25f);
 
-    kern::ops::MatVec(t_a, t_v, t_out); // warm-up
-
     bench_dist("MatVec f16 [4096x4096].[4096]", 20, [&] { kern::ops::MatVec(t_a, t_v, t_out); });
 }
 
@@ -138,8 +138,6 @@ void test_bench_matmultransposed_f16() {
         a_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>(i % 512) - 0.25f);
         b_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>((i * 7) % 512) - 0.25f);
     }
-
-    kern::ops::MatMulTransposed(t_a, t_b_t, t_out); // warm-up
 
     bench_dist("MatMulTransposed f16 512x512", 30,
                [&] { kern::ops::MatMulTransposed(t_a, t_b_t, t_out); });

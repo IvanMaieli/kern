@@ -15,6 +15,7 @@ int main() {
     std::printf("Running ops add mismatched...\n"); test_ops_add_mismatched_shape();
     std::printf("Running ops matmul...\n"); test_ops_matmul();
     std::printf("Running ops matmul output reuse...\n"); test_ops_matmul_output_reuse();
+    std::printf("Running ops matmul zero k...\n"); test_ops_matmul_zero_k();
     std::printf("Running ops matmul non contiguous...\n"); test_ops_matmul_non_contiguous_rejected();
     std::printf("Running ops matmul transposed...\n"); test_ops_matmul_transposed();
     std::printf("Running ops relu...\n"); test_ops_relu();
@@ -34,6 +35,7 @@ int main() {
     std::printf("Running fp16 relu...\n"); test_fp16_relu();
     std::printf("Running fp16 gelu...\n"); test_fp16_gelu();
     std::printf("Running fp16 matmul...\n"); test_fp16_matmul();
+    std::printf("Running fp16 matmul zero k...\n"); test_fp16_matmul_zero_k();
     std::printf("Running fp16 matmul transposed...\n"); test_fp16_matmul_transposed();
     std::printf("Running fp16 matvec...\n"); test_fp16_matvec();
     std::printf("Running fp16 softmax...\n"); test_fp16_softmax();

@@ -18,6 +18,7 @@
   <component name="CMakeRunConfigurationManager">
     <generated>
       <config projectName="kern" targetName="kern-run" />
+      <config projectName="kern" targetName="kern_fmlal" />
       <config projectName="kern" targetName="kern-tests" />
       <config projectName="kern" targetName="kern" />
     </generated>
@@ -28,12 +29,15 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="VecMat added. Fp16 support added">
+    <list default="true" id="1c19259e-812f-43a6-af59-f02df0843159" name="Changes" comment="optimization">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/CMakeLists.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/ops.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/ops.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/thread_pool.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/src/thread_pool.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/bench_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/bench_test.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/fp16_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/fp16_test.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/main.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/main.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/ops_test.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/ops_test.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/tests.hpp" beforeDir="false" afterPath="$PROJECT_DIR$/tests/tests.hpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -72,23 +76,23 @@
   </component>
   <component name="NextEditCompletionFeaturesState">
     <decayedCancelled>
-      <entry key="MS100" value="1.020077097259625" />
-      <entry key="MS500" value="1.6174202837239509" />
-      <entry key="S2" value="3.078303700377683" />
-      <entry key="S5" value="4.822748929038495" />
-      <entry key="S10" value="6.4784103256244405" />
-      <entry key="S30" value="8.497660753956978" />
-      <entry key="S60" value="9.196238474380454" />
-      <entry key="M2" value="9.598642583555783" />
-      <entry key="M5" value="10.652620103094922" />
-      <entry key="M10" value="13.056258984156015" />
-      <entry key="M15" value="14.853957557613663" />
-      <entry key="M30" value="17.648250400214827" />
-      <entry key="H1" value="19.63353723531282" />
-      <entry key="H2" value="22.122575243651095" />
-      <entry key="H4" value="29.431112768984548" />
-      <entry key="D1" value="79.35765607057986" />
-      <entry key="W1" value="397.78687007100683" />
+      <entry key="MS100" value="1.0119239000700044" />
+      <entry key="MS500" value="1.4123667743050408" />
+      <entry key="S2" value="1.8013475553682765" />
+      <entry key="S5" value="1.9152260366032419" />
+      <entry key="S10" value="1.956674467414722" />
+      <entry key="S30" value="1.98534441902259" />
+      <entry key="S60" value="1.9926451626954065" />
+      <entry key="M2" value="1.996315795040482" />
+      <entry key="M5" value="1.9992578970366748" />
+      <entry key="M10" value="2.107581179123316" />
+      <entry key="M15" value="2.6082496954414554" />
+      <entry key="M30" value="5.572458465558099" />
+      <entry key="H1" value="10.833650695005106" />
+      <entry key="H2" value="16.8391061190514" />
+      <entry key="H4" value="26.10421867445506" />
+      <entry key="D1" value="78.76029313431896" />
+      <entry key="W1" value="397.90031414732834" />
     </decayedCancelled>
     <decayedSelected>
       <entry key="MS100" value="0.0" />
@@ -99,34 +103,34 @@
       <entry key="S30" value="0.0" />
       <entry key="S60" value="0.0" />
       <entry key="M2" value="0.0" />
-      <entry key="M5" value="1.3439151090877337E-265" />
-      <entry key="M10" value="5.184421154185198E-133" />
-      <entry key="M15" value="8.13098896908057E-89" />
-      <entry key="M30" value="1.2752243957541385E-44" />
-      <entry key="H1" value="1.5970123926745268E-22" />
-      <entry key="H2" value="1.7872027648322466E-11" />
-      <entry key="H4" value="6.033418129598243E-6" />
-      <entry key="D1" value="2.466127168893226" />
-      <entry key="W1" value="49.89937760112174" />
+      <entry key="M5" value="9.250058469407889E-270" />
+      <entry key="M10" value="4.301169868175135E-135" />
+      <entry key="M15" value="3.332224493420419E-90" />
+      <entry key="M30" value="2.581558985811986E-45" />
+      <entry key="H1" value="7.18548366376057E-23" />
+      <entry key="H2" value="1.1988026317530206E-11" />
+      <entry key="H4" value="4.941403903660372E-6" />
+      <entry key="D1" value="2.385411394518943" />
+      <entry key="W1" value="49.66272341029585" />
     </decayedSelected>
     <decayedShown>
-      <entry key="MS100" value="0.9854644169040973" />
-      <entry key="MS500" value="1.6070985499417259" />
-      <entry key="S2" value="3.073694848719729" />
-      <entry key="S5" value="4.819939968623953" />
-      <entry key="S10" value="6.476547079896454" />
-      <entry key="S30" value="8.496852763737428" />
-      <entry key="S60" value="9.195802101471742" />
-      <entry key="M2" value="9.598414857359181" />
-      <entry key="M5" value="10.652514708924869" />
-      <entry key="M10" value="13.056188682734762" />
-      <entry key="M15" value="14.853901857277124" />
-      <entry key="M30" value="17.648215675273747" />
-      <entry key="H1" value="19.63351745533326" />
-      <entry key="H2" value="22.122564188384313" />
-      <entry key="H4" value="29.43111195640213" />
-      <entry key="D1" value="81.8236764704186" />
-      <entry key="W1" value="447.68592848829104" />
+      <entry key="MS100" value="0.9708619597208037" />
+      <entry key="MS500" value="1.4018031863366565" />
+      <entry key="S2" value="1.7981601404340177" />
+      <entry key="S5" value="1.9138872374247609" />
+      <entry key="S10" value="1.9559934558595924" />
+      <entry key="S30" value="1.9851147382422782" />
+      <entry key="S60" value="1.9925299814929767" />
+      <entry key="M2" value="1.9962581187651365" />
+      <entry key="M5" value="1.999234798649993" />
+      <entry key="M10" value="2.10756904687076" />
+      <entry key="M15" value="2.60823971263799" />
+      <entry key="M30" value="5.572447585420568" />
+      <entry key="H1" value="10.833639870029051" />
+      <entry key="H2" value="16.839097740825693" />
+      <entry key="H4" value="26.10421752759919" />
+      <entry key="D1" value="81.14560117408479" />
+      <entry key="W1" value="447.56271987609614" />
     </decayedShown>
   </component>
   <component name="ProjectApplicationVersion">
@@ -218,6 +222,11 @@
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
       </method>
     </configuration>
+    <configuration name="kern_fmlal" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="kern" TARGET_NAME="kern_fmlal" CONFIG_NAME="Release">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="All CTest" type="CTestRunConfiguration" factoryName="CTestRun" PROGRAM_PARAMS="--extra-verbose" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" WORKING_DIR="file://$CMakeCurrentLocalGenerationDir$" PASS_PARENT_ENVS_2="true" CONFIG_NAME="Release" RUN_PATH="$CTestCurrentExecutableName$" EXPLICIT_BUILD_TARGET_NAME="all" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
@@ -228,6 +237,7 @@
       <item itemvalue="CMake Application.kern" />
       <item itemvalue="CMake Application.kern-run" />
       <item itemvalue="CMake Application.kern-tests" />
+      <item itemvalue="CMake Application.kern_fmlal" />
       <item itemvalue="CTest Application.All CTest" />
     </list>
   </component>
@@ -251,7 +261,6 @@
     <isAutomaticBootstrapAfterUpdate value="false" />
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="version, dtype and shape testing implemented" />
     <MESSAGE value="test update" />
     <MESSAGE value="tensor.hpp declaration" />
     <MESSAGE value="tensor data structure implementation" />
@@ -276,7 +285,8 @@
     <MESSAGE value="MatMul pretransposed optimization aand debugging" />
     <MESSAGE value="ops optimization" />
     <MESSAGE value="VecMat added. Fp16 support added" />
-    <option name="LAST_COMMIT_MESSAGE" value="VecMat added. Fp16 support added" />
+    <MESSAGE value="optimization" />
+    <option name="LAST_COMMIT_MESSAGE" value="optimization" />
   </component>
   <component name="XSLT-Support.FileAssociations.UIState">
     <expand />

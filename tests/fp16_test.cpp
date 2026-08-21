@@ -141,6 +141,21 @@ void test_fp16_matmul() {
     CHECK(static_cast<float>(out_ptr[3]) == 154.0f);
 }
 
+void test_fp16_matmul_zero_k() {
+    // Same contract as the float32 kernel: K == 0 writes zeros (empty sum)
+    // instead of leaving the stale buffer behind.
+    kern::Tensor t_a(kern::Shape{2, 0}, kern::DataType::float16);
+    kern::Tensor t_b(kern::Shape{0, 3}, kern::DataType::float16);
+    kern::Tensor t_out(kern::Shape{2, 3}, kern::DataType::float16);
+
+    auto* out_ptr = static_cast<__fp16*>(t_out.data());
+    for (std::size_t i = 0; i < 6; ++i) out_ptr[i] = static_cast<__fp16>(42.0f);
+
+    kern::ops::MatMul(t_a, t_b, t_out);
+
+    for (std::size_t i = 0; i < 6; ++i) CHECK(static_cast<float>(out_ptr[i]) == 0.0f);
+}
+
 void test_fp16_matmul_transposed() {
     kern::Tensor t_a(kern::Shape{2, 3}, kern::DataType::float16);
     kern::Tensor t_b_t(kern::Shape{2, 3}, kern::DataType::float16);
