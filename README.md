@@ -33,19 +33,30 @@ Zero-copy view operations (`Transpose`, `Permute`) permute the `Shape`'s strides
 All compute-heavy kernels share one dispatch primitive: `parallel_for(total, min_work, body)` splits a range across the persistent `ThreadPool` (hardware-concurrency `jthread`s) and joins via a `std::latch`. A `min_work` threshold keeps small tensors single-threaded — dispatching a 10-element ReLU to eight cores would cost 100x more in synchronization than in arithmetic.
 
 ### 5. Dtype Traits: float16 Without a Second Kernel Library
-`F32Traits` and `F16Traits` provide `load4/store4/load1/store1`; every templated kernel body (Add, ReLU, GELU, Softmax, LayerNorm, MatMul, MatMulTransposed, MatVec) is written once against the traits. For float16, loading converts `__fp16` vectors to float32 lanes (`vcvt_f32_f16`) and storing converts back — so the fp16 result equals the fp32 kernel applied to rounded inputs, with half the bytes streamed from memory. Zero is an all-zero byte pattern in both formats, so the tiled-MatMul zero-fill stays a plain `memset`.
+`F32Traits` and `F16Traits` provide `load4/store4/load1/store1`; every templated kernel body (Add, ReLU, GELU, Softmax, LayerNorm, MatMul, MatMulTransposed, MatVec) is written once against the traits. For float16, loading converts `__fp16` vectors to float32 lanes (`vcvt_f32_f16`) and storing converts back — so the fp16 result equals the fp32 kernel applied to rounded inputs, with half the bytes streamed from memory.
 
-Where conversion throughput would cap performance (dot products, the MatMul micro-kernel), the traits path is bypassed for **FMLAL** kernels (`vfmlalq_low/high_f16`, guarded by `__ARM_FEATURE_FP16_FML`): fp16 loads feed a widening multiply-accumulate into fp32 accumulators directly — no conversion instructions, 8 elements per vector pair, and fp32 accumulation precision. Toolchains or targets without `fp16fml` fall back to the conversion kernels automatically.
+Where conversion throughput would cap performance (dot products, the MatMul micro-kernel), the traits path is bypassed for **FMLAL** kernels (`vfmlalq_low/high_f16`): fp16 loads feed a widening multiply-accumulate into fp32 accumulators directly — no conversion instructions, 8 elements per vector pair, and fp32 accumulation precision.
+
+FMLAL is silicon-optional (FEAT_FP16FML): Apple M1/M2 lack it, M3 and later have it, and clang predefines `__ARM_FEATURE_FP16_FML` for *every* apple arm64 `-mcpu` — so compiling it in unconditionally ships SIGILLs to M1/M2 machines. Kern dispatches it at **run time**: the FMLAL kernels live in the only translation unit compiled with the feature enabled (`src/ops_fmlal.cpp`, target `kern_fmlal`); every other target compiles with the feature off, so no fmlal instruction can exist outside that unit (verified by `objdump`). `fp16_fml_available()` in `ops.cpp` probes the `hw.optional.arm.FEAT_FP16FML` sysctl (published by macOS if ever) and falls back to the chip generation parsed from the CPU brand string; unsupported silicon takes the portable conversion kernels.
 
 ### 5b. Register-Blocked Micro-Kernels
 Two throughput techniques applied throughout the compute kernels:
 *   **Independent FMA chains:** a single accumulator vector serializes on FMA latency (~4 cycles); every dot product and the MatMul micro-kernel keep 4+ independent chains so both FMA pipes stay busy.
-*   **4x16 register micro-tiles in MatMul:** inside a 64x64 tile, 16 accumulators cover 4 rows x 16 output columns, so each 4-vector B load feeds 16 FMAs — the inner loop is FMA-bound instead of load-bound (a 1-row block pays one B load per 4 FMAs and wastes ~2x). `out` is read/written once per k-tile instead of once per k step (64x less output traffic), and the first k-tile defines the tile from zero so stale destination buffers never leak into results. The f16 variant runs the same shape with FMLAL widening multiply-accumulates.
+*   **4x16 register micro-tiles in MatMul:** inside a 64x64 tile, 16 accumulators cover 4 rows x 16 output columns, so each 4-vector B load feeds 16 FMAs — the inner loop is FMA-bound instead of load-bound (a 1-row block pays one B load per 4 FMAs and wastes ~2x). Accumulators run over the whole K in fp32 registers and store exactly once per output cell: no partial sum ever round-trips through storage-format memory (fp16 accumulation precision matches fp32 for any K), a stale destination buffer never leaks into results, and `K == 0` (an empty contraction) writes zeros. The tile/remainder skeleton (`src/matmul_tiling.hpp`) is shared by the dtype-generic kernels and the FMLAL variant, so the structure exists exactly once.
 
 ### 6. MatVec: the Decode-Path GEMV
 `out[M] = A[M,K] · v[K]` is the shape LLM decoding hits every token (M = 1). With so few rows, row-parallelism cannot fill the pool, so `MatVec` chooses between two strategies:
 *   **M ≥ core count:** parallel over rows, one NEON dot product per row.
 *   **M small:** the K axis is split into chunks; each thread computes partial dot products into a *disjoint scratch column* (no atomics), and the caller reduces them in deterministic order.
+
+### 7. Attention over a KV Cache
+`Attention(q, k_cache, v_cache, base, n_heads, head_dim, out)` implements causal multi-head attention against a preallocated KV cache (`KVCacheAppend` copies a token's K/V rows in; the caller owns the write cursor):
+
+*   **Causality is loop bounds, not a mask tensor:** token `i` (absolute position `base+i`) reads cache rows `[0, base+i]`, itself included. No mask materialization, no masked-out compute.
+*   **Streaming (online) softmax:** one pass over the attended rows keeps a running maximum and normalizer; the output accumulator is rescaled only when a new maximum appears. Each K/V row is read exactly once and no score matrix is ever stored — prefill of a long prompt allocates no `M x seq` scratch.
+*   **GQA/MQA native:** query head `h` reads kv head `h / (n_heads / n_kv_heads)`, so Llama-style grouped heads stream the cache once per group.
+*   **Balanced parallel decomposition:** the work unit is one (token, query-head) pair; a strided token mapping keeps late tokens (which read more cache under the causal bound) spread evenly across parallel chunks instead of piling into the last one.
+*   f16 decode reuses the dot kernel, so it gets the FMLAL dispatch for free; accumulation stays in fp32 lanes regardless of storage format.
 
 ---
 
@@ -98,6 +109,7 @@ Current operator benchmarks (Release build, M-series; median of 20–30 iteratio
 | MatVec (f16) | [4096x4096]·[4096] | ~0.23 ms | ~0.24 ms | ~145 GB/s (≈ peak) |
 | Broadcast Add | 512x512 + 512 | ~0.02 ms | | |
 | GELU | 512x2048 | ~0.13 ms/iter | | |
+| Attention decode (f16, GQA) | 32 Q-heads / 8 KV-heads / hd 128, pos 511 | ~0.10 ms | ~0.12 ms | ~21 GB/s cache bandwidth |
 
 Two scaling notes worth knowing:
 *   With the 4x16 register-blocked micro-kernel, plain `MatMul` on row-major B now **outperforms `MatMulTransposed`** (~370 vs ~195 GFLOPS): the register block amortizes each B load across 4 rows, which the dot-product layout cannot. `MatMulTransposed` remains the right shape for `M = 1` decode work (see `MatVec`), but batched matmuls should use `MatMul`.
@@ -113,6 +125,7 @@ Our operator library is designed to be highly modular, with all kernels placed i
 
 *   **MatMul / MatMulTransposed:** The engine's powerhouse. `MatMul` uses an optimized tiled `m-n-k` loop ordering with SIMD acceleration across a persistent thread pool, and zeroes its output tiles so destination buffers can be safely reused. `MatMulTransposed` takes `B` pre-transposed (`[N, K]`): both operands are then contiguous along the reduction axis, making it ~2x faster than `MatMul` on the same shapes — the preferred layout for stored weights.
 *   **MatVec:** the decode-path GEMV (see above), with row-parallel and K-split strategies.
+*   **Attention + KV cache:** causal multi-head attention with streaming softmax and GQA support (see above). The cache is a plain preallocated tensor owned by the caller — append with `KVCacheAppend`, attend with `Attention`; with `M == 1` it is the decode path, with `M > 1` it covers chunked prefill.
 *   **Activation Functions:** `ReLU` (NEON `vmax`) and `GELU` (a vectorized `tanh` approximation built from a Pade approximant and the double-angle identity, accurate to ~1e-7) run as parallel element-wise kernels.
 *   **Reduction Operators:** `Softmax` and `LayerNorm` are NEON-vectorized in all passes (max reduction, mean/variance via FMA, normalization by reciprocal product) and parallelized over rows. `Softmax` includes a "Max Trick" for numerical stability to prevent overflows in exponentiation.
 
@@ -135,14 +148,15 @@ cmake --build build-release -j
 ./build-release/kern-tests       # runs the full suite incl. benchmarks (read numbers in Release only)
 ```
 
-The test suite covers: shape/stride semantics, zero-copy views, broadcasting (including rank-0 scalars and rejected in-place broadcasting), MatMul buffer reuse with NaN-poisoned outputs, non-contiguous view rejection, NEON tail handling, GELU accuracy sweeps, fp16 kernels, MatVec (small-K tail and 4096-wide decode shape), and the graph engine (correctness vs. manually-chained ops, arena reuse, rerun stability).
+The test suite covers: shape/stride semantics, zero-copy views, broadcasting (including rank-0 scalars and rejected in-place broadcasting), MatMul buffer reuse with NaN-poisoned outputs (and the `K == 0` empty-contraction contract), non-contiguous view rejection, NEON tail handling, GELU accuracy sweeps, fp16 kernels, MatVec (small-K tail and 4096-wide decode shape), attention (verified against a naive double-precision reference: causal bounds with poisoned out-of-range rows, GQA head mapping, prefill-then-decode flow, fp16), and the graph engine (correctness vs. manually-chained ops, arena reuse, rerun stability).
 
 ---
 
 ## Roadmap for Future Development
 
-*   ~~Multicore Parallelization~~, ~~Tiled MatMul~~, ~~Decode-Path GEMV~~, ~~float16 kernels~~, ~~Graph Execution Engine~~ and ~~Native fp16 FMA (FMLAL)~~: shipped.
-*   **Attention + KV cache:** the next inference-graph operator; the arena planner already provides the memory discipline a bounded KV cache needs.
-*   **int8 / Quantized Kernels:** the dtype slot exists; kernels and dequantization paths do not.
+*   ~~Multicore Parallelization~~, ~~Tiled MatMul~~, ~~Decode-Path GEMV~~, ~~float16 kernels~~, ~~Graph Execution Engine~~, ~~Native fp16 FMA (FMLAL, runtime-dispatched)~~ and ~~Attention + KV cache~~: shipped.
+*   **Weight Loading:** import pretransposed fp16 weights from file (safetensors-style) to feed `Graph::add_param` — the next step toward end-to-end model inference.
+*   **int8 / Quantized Kernels:** the dtype slot exists; kernels and dequantization paths do not (quantize at load time, so this lands after weight loading).
+*   **Kernel Fusion in the Graph:** fuse LayerNorm→GEMV and bias-add into GELU within a node to skip round-trips to memory between producers and consumers; also needs a graph-level story for the KV cache (mutated state that outlives a run does not fit the pure-SSA arena yet).
 *   **Weight Loading:** import pretransposed fp16 weights from file (safetensors-style) to feed `Graph::add_param`.
 *   **Kernel Fusion in the Graph:** fuse LayerNorm→GEMV and bias-add into GELU within a node to skip round-trips to memory between producers and consumers.

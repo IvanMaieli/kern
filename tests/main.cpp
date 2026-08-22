@@ -41,6 +41,12 @@ int main() {
     std::printf("Running fp16 softmax...\n"); test_fp16_softmax();
     std::printf("Running fp16 layernorm...\n"); test_fp16_layernorm();
     std::printf("Running fp16 int8 unsupported...\n"); test_fp16_int8_unsupported();
+    std::printf("Running attention decode...\n"); test_attention_decode();
+    std::printf("Running attention causal bounds...\n"); test_attention_causal_bounds();
+    std::printf("Running attention gqa...\n"); test_attention_gqa();
+    std::printf("Running kv cache append...\n"); test_kv_cache_append();
+    std::printf("Running attention prefill then decode...\n"); test_attention_prefill_then_decode();
+    std::printf("Running attention fp16...\n"); test_attention_fp16();
     std::printf("Running graph matvec mlp...\n"); test_graph_matvec_mlp();
     std::printf("Running graph transformer block...\n"); test_graph_transformer_block();
     std::printf("Running graph memory reuse...\n"); test_graph_memory_reuse();
@@ -52,6 +58,7 @@ int main() {
     std::printf("Running bench matvec...\n"); test_bench_matvec();
     std::printf("Running bench matvec f16...\n"); test_bench_matvec_f16();
     std::printf("Running bench matmultransposed f16...\n"); test_bench_matmultransposed_f16();
+    std::printf("Running bench attention decode...\n"); test_bench_attention_decode();
     std::printf("Running ops reshape...\n"); test_ops_reshape();
     std::printf("Running ops permute...\n"); test_ops_permute();
     std::printf("Running ops permute data...\n"); test_ops_permute_data();

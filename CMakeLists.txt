@@ -127,6 +127,7 @@ if(KERN_BUILD_TESTS)
             tests/memory_pool_test.cpp
             tests/ops_test.cpp
             tests/fp16_test.cpp
+            tests/attention_test.cpp
             tests/graph_test.cpp
             tests/bench_test.cpp
     )

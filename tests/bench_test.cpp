@@ -142,3 +142,42 @@ void test_bench_matmultransposed_f16() {
     bench_dist("MatMulTransposed f16 512x512", 30,
                [&] { kern::ops::MatMulTransposed(t_a, t_b_t, t_out); });
 }
+
+void test_bench_attention_decode() {
+    // Decode-path MHA with GQA, Llama-7B head layout: each call streams the
+    // whole K and V cache once (2 * seq * n_kv * head_dim * 2 bytes).
+    constexpr size_t n_heads = 32, n_kv = 8, head_dim = 128, max_seq = 512;
+    constexpr double cache_bytes = 2.0 * static_cast<double>(max_seq) *
+                                   static_cast<double>(n_kv * head_dim) * 2.0;
+
+    kern::Tensor t_q(kern::Shape{1, n_heads * head_dim}, kern::DataType::float16);
+    kern::Tensor t_k(kern::Shape{max_seq, n_kv * head_dim}, kern::DataType::float16);
+    kern::Tensor t_v(kern::Shape{max_seq, n_kv * head_dim}, kern::DataType::float16);
+    kern::Tensor t_out(kern::Shape{1, n_heads * head_dim}, kern::DataType::float16);
+
+    auto* q_ptr = static_cast<__fp16*>(t_q.data());
+    auto* k_ptr = static_cast<__fp16*>(t_k.data());
+    auto* v_ptr = static_cast<__fp16*>(t_v.data());
+    for (size_t i = 0; i < n_heads * head_dim; ++i)
+        q_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>(i % 512) - 0.25f);
+    for (size_t i = 0; i < max_seq * n_kv * head_dim; ++i) {
+        k_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>(i % 512) - 0.25f);
+        v_ptr[i] = static_cast<__fp16>(0.001f * static_cast<float>((i * 7) % 512) - 0.25f);
+    }
+
+    bench_dist("Attention decode f16 32h/8kv/128d pos 511", 20, [&] {
+        kern::ops::Attention(t_q, t_k, t_v, max_seq - 1, n_heads, head_dim, t_out);
+    });
+
+    // Bandwidth estimate: average over a few post-warmup calls.
+    double total_ms = 0.0;
+    constexpr int iters = 10;
+    for (int it = 0; it < iters; ++it) {
+        const auto start = std::chrono::high_resolution_clock::now();
+        kern::ops::Attention(t_q, t_k, t_v, max_seq - 1, n_heads, head_dim, t_out);
+        const auto end = std::chrono::high_resolution_clock::now();
+        total_ms += std::chrono::duration<double, std::milli>(end - start).count();
+    }
+    std::printf("Attention decode f16 cache bandwidth: %.1f GB/s\n",
+                cache_bytes / (total_ms / iters * 1e-3) / 1e9);
+}

@@ -465,6 +465,159 @@ namespace kern::ops {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Attention over a KV cache.
+    // ------------------------------------------------------------------
+
+    void KVCacheAppend(const Tensor& x, std::size_t base, Tensor& cache) {
+        if (x.shape().rank() != 2 || cache.shape().rank() != 2)
+            throw std::invalid_argument("KVCacheAppend: expected 2D tensors.");
+        const size_t M = x.shape().dimension(0);
+        const size_t C = x.shape().dimension(1);
+        if (cache.shape().dimension(1) != C)
+            throw std::invalid_argument("KVCacheAppend: x row width must match the cache.");
+        if (base + M > cache.shape().dimension(0))
+            throw std::out_of_range("KVCacheAppend: append past the end of the cache.");
+        if (x.dtype() != cache.dtype())
+            throw std::invalid_argument("KVCacheAppend: dtypes must match.");
+        require_contiguous(x, "KVCacheAppend");
+        require_contiguous(cache, "KVCacheAppend");
+        if (Tensor::is_aliased(x, cache))
+            throw std::invalid_argument("KVCacheAppend: x must not alias the cache.");
+        if (M == 0 || C == 0) return;
+
+        // Both sides contiguous: the destination slice is one flat block.
+        const size_t el = size_bytes(x.dtype());
+        std::memcpy(static_cast<char*>(cache.data()) + base * C * el, x.data(), M * C * el);
+    }
+
+    // One (token, query head) attention task: scores against cache rows
+    // [0, t_count), streaming softmax, weighted V accumulation. The online
+    // max/sum rescales the running state only when a new maximum appears, so
+    // each K/V row is read exactly once and no score vector is stored. The
+    // output accumulator lives in f32 lanes regardless of the storage format.
+    template <typename Tr>
+    static void attention_tasks(const typename Tr::T* q, const typename Tr::T* k_cache,
+                                const typename Tr::T* v_cache, typename Tr::T* out,
+                                float* scratch,
+                                size_t M, size_t base, size_t n_heads, size_t n_kv,
+                                size_t head_dim, size_t idx_start, size_t idx_end) {
+        const size_t q_stride = n_heads * head_dim;
+        const size_t kv_stride = n_kv * head_dim;
+        const size_t gqa = n_heads / n_kv;
+        const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
+
+        for (size_t idx = idx_start; idx < idx_end; ++idx) {
+            // Strided token mapping (i = idx % M): contiguous parallel chunks
+            // mix early and late tokens, keeping a chunk's work balanced
+            // under the causal bound (late tokens read more cache rows).
+            const size_t i = idx % M;
+            const size_t h = idx / M;
+            const size_t g = h / gqa;
+            const size_t t_count = base + i + 1;
+            const typename Tr::T* q_h = q + i * q_stride + h * head_dim;
+            const typename Tr::T* k_head = k_cache + g * head_dim;
+            const typename Tr::T* v_head = v_cache + g * head_dim;
+            float* acc = scratch + idx * head_dim;
+
+            float m = -std::numeric_limits<float>::infinity();
+            float l = 0.0f;
+            for (size_t j = 0; j < head_dim; ++j) acc[j] = 0.0f;
+
+            for (size_t t = 0; t < t_count; ++t) {
+                const float s = scale * dot_range<Tr>(q_h, k_head + t * kv_stride, head_dim);
+                if (s > m) {
+                    // New running maximum: rescale the state accumulated so far.
+                    const float correction = std::exp(m - s);
+                    l *= correction;
+                    const float32x4_t vc = vdupq_n_f32(correction);
+                    size_t j = 0;
+                    for (; j + 3 < head_dim; j += 4)
+                        vst1q_f32(acc + j, vmulq_f32(vld1q_f32(acc + j), vc));
+                    for (; j < head_dim; ++j) acc[j] *= correction;
+                    m = s;
+                }
+                const float p = std::exp(s - m);
+                l += p;
+                const float32x4_t vp = vdupq_n_f32(p);
+                size_t j = 0;
+                for (; j + 3 < head_dim; j += 4)
+                    vst1q_f32(acc + j, vfmaq_f32(vld1q_f32(acc + j), vp,
+                                                 Tr::load4(v_head + t * kv_stride + j)));
+                for (; j < head_dim; ++j)
+                    acc[j] += p * Tr::load1(v_head + t * kv_stride + j);
+            }
+
+            const float inv_l = 1.0f / l;
+            const float32x4_t vinv = vdupq_n_f32(inv_l);
+            typename Tr::T* out_h = out + i * q_stride + h * head_dim;
+            size_t j = 0;
+            for (; j + 3 < head_dim; j += 4)
+                Tr::store4(out_h + j, vmulq_f32(vld1q_f32(acc + j), vinv));
+            for (; j < head_dim; ++j)
+                Tr::store1(out_h + j, acc[j] * inv_l);
+        }
+    }
+
+    void Attention(const Tensor& q, const Tensor& k_cache, const Tensor& v_cache,
+                   std::size_t base, std::size_t n_heads, std::size_t head_dim,
+                   Tensor& out) {
+        if (q.shape().rank() != 2 || k_cache.shape().rank() != 2 ||
+            v_cache.shape().rank() != 2 || out.shape().rank() != 2)
+            throw std::invalid_argument("Attention: expected 2D tensors.");
+        if (head_dim == 0 || n_heads == 0)
+            throw std::invalid_argument("Attention: head_dim and n_heads must be positive.");
+        if (k_cache.shape().dimension(1) % head_dim != 0)
+            throw std::invalid_argument("Attention: cache width must be a multiple of head_dim.");
+        const size_t M = q.shape().dimension(0);
+        const size_t n_kv = k_cache.shape().dimension(1) / head_dim;
+        if (n_kv == 0 || n_heads % n_kv != 0)
+            throw std::invalid_argument("Attention: n_heads must be a multiple of the cache's kv heads.");
+        if (v_cache.shape() != k_cache.shape())
+            throw std::invalid_argument("Attention: K and V caches must have the same shape.");
+        if (q.shape().dimension(1) != n_heads * head_dim)
+            throw std::invalid_argument("Attention: q width must be n_heads * head_dim.");
+        if (out.shape() != q.shape())
+            throw std::invalid_argument("Attention: out must have q's shape.");
+        if (base + M > k_cache.shape().dimension(0))
+            throw std::out_of_range("Attention: query batch runs past the end of the cache.");
+        if (q.dtype() != k_cache.dtype() || q.dtype() != v_cache.dtype() || q.dtype() != out.dtype())
+            throw std::invalid_argument("Attention: all tensors must share a dtype.");
+        require_contiguous(q, "Attention");
+        require_contiguous(k_cache, "Attention");
+        require_contiguous(v_cache, "Attention");
+        require_contiguous(out, "Attention");
+        if (Tensor::is_aliased(out, q) || Tensor::is_aliased(out, k_cache) ||
+            Tensor::is_aliased(out, v_cache))
+            throw std::invalid_argument("Attention: output must not alias an input.");
+
+        if (M == 0) return;
+
+        // f32 accumulator scratch, one head_dim slice per (token, head) task.
+        std::vector<float> scratch(M * n_heads * head_dim);
+        float* acc_ptr = scratch.data();
+
+        if (q.dtype() == DataType::float32) {
+            const float* q_ptr = static_cast<const float*>(q.data());
+            const float* k_ptr = static_cast<const float*>(k_cache.data());
+            const float* v_ptr = static_cast<const float*>(v_cache.data());
+            float* out_ptr = static_cast<float*>(out.data());
+            parallel_for(M * n_heads, 1, [&](size_t s, size_t e) {
+                attention_tasks<F32Traits>(q_ptr, k_ptr, v_ptr, out_ptr, acc_ptr,
+                                           M, base, n_heads, n_kv, head_dim, s, e);
+            });
+        } else if (q.dtype() == DataType::float16) {
+            const __fp16* q_ptr = static_cast<const __fp16*>(q.data());
+            const __fp16* k_ptr = static_cast<const __fp16*>(k_cache.data());
+            const __fp16* v_ptr = static_cast<const __fp16*>(v_cache.data());
+            __fp16* out_ptr = static_cast<__fp16*>(out.data());
+            parallel_for(M * n_heads, 1, [&](size_t s, size_t e) {
+                attention_tasks<F16Traits>(q_ptr, k_ptr, v_ptr, out_ptr, acc_ptr,
+                                           M, base, n_heads, n_kv, head_dim, s, e);
+            });
+        } else throw std::runtime_error("Unsupported dtype for Attention operation.");
+    }
+
     Shape GetBroadcastShape(const Shape& a, const Shape& b) {
         const size_t rank_a = a.rank();
         const size_t rank_b = b.rank();
